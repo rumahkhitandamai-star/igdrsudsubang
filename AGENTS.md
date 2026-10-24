@@ -86,7 +86,7 @@ igd_rsudsubang/
 - **Deployment ID (Web App)**: `AKfycbzdzfwzNOWKJEH1pCwqJyhfK3IaBCrKua0awE-GWOIGHZdXynQmMPc70Q2OoKlFfZIR`
 - **Web App URL**: `https://script.google.com/macros/s/AKfycbzdzfwzNOWKJEH1pCwqJyhfK3IaBCrKua0awE-GWOIGHZdXynQmMPc70Q2OoKlFfZIR/exec`
 - **Google Drive Folder**: `https://drive.google.com/drive/folders/1roxR2bu5O-Q1O05bjvh9_N69QHXw8NZ_?usp=drive_link` (`1roxR2bu5O-Q1O05bjvh9_N69QHXw8NZ_` / `gdrive:Aplikasi Web/igd_rsudsubang`)
-- **Git**: Repositori lokal belum diinisialisasi `.git`. Jika git digunakan di masa mendatang, terapkan konvensi commit: `feat:`, `fix:`, `chore:`, `docs:`.
+- **Git**: Repositori GitHub: `https://github.com/rumahkhitandamai-star/igdrsudsubang` (branch `main`). Terapkan konvensi commit: `feat:`, `fix:`, `chore:`, `docs:`.
 
 ## Aturan Wajib: Sinkronisasi Otomatis Setiap Ada Perubahan
 **PENTING:** Setiap kali ada modifikasi kode (`Index.html`, `Kode.gs`) atau dokumen (`AGENTS.md`, `prd.md`), AI agent WAJIB menjalankan:
