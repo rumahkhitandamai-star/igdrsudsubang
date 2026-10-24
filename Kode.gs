@@ -362,7 +362,59 @@ function ensureInventarisSheets() {
   }
 }
 
-function getAllSheetsData(token) {
+function getRevMap_() {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty('IGD_REV_MAP');
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function bumpRev_(sheetName) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const revMap = getRevMap_();
+    const cur = parseInt(revMap[sheetName], 10) || 0;
+    revMap[sheetName] = cur + 1;
+    props.setProperty('IGD_REV_MAP', JSON.stringify(revMap));
+    return revMap[sheetName];
+  } catch (e) {
+    console.warn('Peringatan bumpRev_: ' + e.toString());
+    return 0;
+  }
+}
+
+function readSheetCached_(name, sheet, fingerprint) {
+  const cache = CacheService.getScriptCache();
+  const safeName = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, name)).replace(/[^a-zA-Z0-9]/g, '').substring(0, 14);
+  const safeFp = String(fingerprint).replace(/[^a-zA-Z0-9]/g, '_');
+  const cacheKey = 'S_' + safeName + '_' + safeFp;
+
+  try {
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {}
+
+  const vals = sheet.getDataRange().getDisplayValues();
+  const finalVals = (name === 'USERS') ? maskUsersPasswordColumn_(vals) : vals;
+
+  try {
+    const str = JSON.stringify(finalVals);
+    if (str.length < 100000) {
+      cache.put(cacheKey, str, 300); // 5 menit TTL
+    }
+  } catch (e) {}
+
+  return finalVals;
+}
+
+function getAllSheetsData(token, clientRevs) {
   const session = verifySessionToken_(token);
   if (!session) {
     throw new Error('Sesi tidak valid atau telah kedaluwarsa. Silakan login kembali.');
@@ -372,7 +424,15 @@ function getAllSheetsData(token) {
   ensureInventarisSheets();
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const result = {};
+  const currentFingerprints = {};
   const roleLower = (session.role || '').toLowerCase().trim();
+  const revMap = getRevMap_();
+
+  let cRevs = clientRevs;
+  if (typeof cRevs === 'string') {
+    try { cRevs = JSON.parse(cRevs); } catch(e) { cRevs = null; }
+  }
+  if (!cRevs || typeof cRevs !== 'object') cRevs = null;
 
   ALLOWED_SHEETS.forEach(name => {
     if (name === 'USERS' && roleLower !== 'super admin' && roleLower !== 'superadmin') {
@@ -380,13 +440,25 @@ function getAllSheetsData(token) {
       return;
     }
     const sheet = ss.getSheetByName(name);
-    if (sheet) {
-      const vals = sheet.getDataRange().getDisplayValues();
-      result[name] = (name === 'USERS') ? maskUsersPasswordColumn_(vals) : vals;
-    } else {
+    if (!sheet) {
       result[name] = [];
+      return;
     }
+
+    const rev = revMap[name] || 0;
+    const lastRow = sheet.getLastRow();
+    const fp = rev + ':' + lastRow;
+    currentFingerprints[name] = fp;
+
+    // Delta Sync: jika revisi & jumlah baris di klien masih sama persis, lewati
+    if (cRevs && cRevs[name] === fp) {
+      return;
+    }
+
+    result[name] = readSheetCached_(name, sheet, fp);
   });
+
+  result['__revs'] = currentFingerprints;
   return result;
 }
 
@@ -406,10 +478,12 @@ function getSheetData(sheetName, token) {
   }
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(sheetName);
   if (!sheet) throw new Error('Sheet ' + sheetName + ' tidak ditemukan.');
-  // OPTIMASI: Gunakan getDisplayValues() alih-alih getValues() 
-  // Ini mengunci agar Spreadsheet mengirim data tanggal secara aman ke Aplikasi Anda tanpa Error Serialization
-  const vals = sheet.getDataRange().getDisplayValues();
-  return (sheetName === 'USERS') ? maskUsersPasswordColumn_(vals) : vals;
+
+  const revMap = getRevMap_();
+  const rev = revMap[sheetName] || 0;
+  const fp = rev + ':' + sheet.getLastRow();
+
+  return readSheetCached_(sheetName, sheet, fp);
 }
 
 function renumberSheet(sheetName) {
@@ -780,6 +854,7 @@ function saveData(sheetName, rowData, isUpdate, token) {
     }
     // Lakukan Penomoran Ulang setelah simpan/update
     renumberSheet(sheetName);
+    bumpRev_(sheetName);
     // Kembalikan data terbaru untuk Cache FrontEnd
     return getSheetData(sheetName, token);
   } finally {
@@ -814,6 +889,7 @@ function deleteData(sheetName, id, token) {
       throw new Error('Data dengan ID ' + id + ' tidak ditemukan di server.');
     }
     renumberSheet(sheetName);
+    bumpRev_(sheetName);
     return getSheetData(sheetName, token);
   } finally {
     lock.releaseLock();

@@ -1793,12 +1793,19 @@
             }
             return data;
           }
-          getAllSheetsData(token) {
+          getAllSheetsData(token, clientRevs) {
             const result = {};
+            const revs = {};
             ['KUNJUNGAN', 'LIFE SAVING', 'KLB', 'RETENSI', 'IDUL FITRI', 'USERS', 'INVENTARIS ALAT KESEHATAN', 'INVENTARIS ALAT TENUN', 'INVENTARIS ALAT RUMAH TANGGA'].forEach(name => {
               const raw = getStorageSheet(name);
+              const fp = '1:' + raw.length;
+              revs[name] = fp;
+              if (clientRevs && clientRevs[name] === fp) {
+                return;
+              }
               result[name] = (name === 'USERS') ? this.maskMockPassword(raw) : raw;
             });
+            result['__revs'] = revs;
             this._dispatch(result);
           }
           getSheetData(sheetName, token) {
@@ -2406,6 +2413,7 @@
     let isSaving = false;
     let lastSyncTime = null;
     let currentDataFetchSeq = 0;
+    let SYNC_REVS = {};
 
     function escapeHtml(s) {
       if (s === null || s === undefined) return '';
@@ -2623,6 +2631,9 @@
           .withSuccessHandler(data => {
             if (thisSyncSeq < currentDataFetchSeq) return;
             if (data && typeof data === 'object') {
+              if (data.__revs && typeof data.__revs === 'object') {
+                SYNC_REVS = Object.assign({}, SYNC_REVS, data.__revs);
+              }
               if (data['KUNJUNGAN'] && Array.isArray(data['KUNJUNGAN'])) CACHE['Kunjungan'] = data['KUNJUNGAN'];
               if (data['LIFE SAVING'] && Array.isArray(data['LIFE SAVING'])) CACHE['Life Saving'] = data['LIFE SAVING'];
               if (data['KLB'] && Array.isArray(data['KLB'])) CACHE['KLB'] = data['KLB'];
@@ -2660,10 +2671,19 @@
           .withFailureHandler(err => {
             console.warn("Gagal sinkronisasi background:", err);
           })
-          .getAllSheetsData(token);
+          .getAllSheetsData(token, SYNC_REVS);
       } else {
         console.warn("Mode Pratinjau: API google.script.run tidak tersedia di luar environment Apps Script.");
       }
+    }
+
+    // Refresh data saat pengguna kembali ke tab aplikasi (Visibility Change)
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'visible' && typeof getStoredToken === 'function' && getStoredToken()) {
+          syncSpreadsheetInBackground();
+        }
+      });
     }
 
     function formatTanggalIndo(dateString) {
@@ -2870,6 +2890,7 @@
     }
 
     function doLogout() {
+      SYNC_REVS = {};
       localStorage.removeItem('rsud_user');
       localStorage.removeItem('rsud_role');
       localStorage.removeItem('rsud_menu');

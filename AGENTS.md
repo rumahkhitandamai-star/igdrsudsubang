@@ -37,6 +37,10 @@ igd_rsudsubang/
    - `Index.html` dilengkapi polyfill Mock Engine otomatis: jika dibuka di luar Apps Script (misalnya langsung di browser lokal atau Playwright), objek `google.script.run` disimulasikan secara transparan menggunakan data persisten di `localStorage`.
    - Kredensial lokal: `admin` / `admin123` (Super Admin).
    - Di lingkungan Google Apps Script, polyfill ini otomatis non-aktif dan backend `Kode.gs` dijalankan normal.
+5. **Optimasi Sinkronisasi & Server Cache**:
+   - Backend mengelola revisi per-sheet di `PropertiesService` (key `IGD_REV_MAP`) serta fingerprint `rev:lastRow`.
+   - `getAllSheetsData(token, clientRevs)` hanya membaca dan mengirimkan sheet yang mengalami perubahan (delta sync), dilengkapi cache server-side `CacheService.getScriptCache()` (TTL 5 menit) untuk meminimalkan pembacaan fisik Google Sheets.
+   - `Index.html` melacak `SYNC_REVS` dan secara otomatis memperbarui data ketika pengguna kembali ke tab aplikasi (`visibilitychange`).
 
 ## Invarian Kritis (Wajib Diperhatikan)
 1. **Sinkronisasi `APP_SCHEMA` ↔ Spreadsheet**:

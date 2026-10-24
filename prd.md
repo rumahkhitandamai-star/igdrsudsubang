@@ -49,6 +49,12 @@ Instalasi Gawat Darurat (IGD) RSUD Subang memerlukan sistem digital terpusat, ce
   - Google Docs (`DocumentApp`): Membuat salinan dokumen template Word (`templateId`), melakukan penggantian tag placeholder regex secara cepat, mengonversi ke format `.docx`, dan mengembalikan data dalam bentuk payload Base64 instan ke frontend.
   - Subfolder `Temp_Exports` & Pembersihan Otomatis (Auto-Cleanup): Berkas ekspor sementara yang berusia lebih dari 24 jam otomatis dibersihkan ke tempat sampah (Trash).
 
+### 4.3 Optimasi Sinkronisasi & Server Cache
+- **Peta Revisi Global & Fingerprinting:** Backend mengelola revisi per-sheet di `PropertiesService` (kunci `IGD_REV_MAP`) yang diincrement secara atomik pada setiap mutasi `saveData` dan `deleteData`. Fingerprint dihitung sebagai `revisi:lastRow`.
+- **Delta Synchronization:** `getAllSheetsData(token, clientRevs)` membandingkan fingerprint klien dengan server; sheet yang tidak mengalami perubahan diabaikan dari pembacaan fisik maupun transfer payload data.
+- **Server-Side Caching (`CacheService`):** Data tiap sheet disimpan dalam `CacheService.getScriptCache()` bertanda kunci fingerprint (TTL 300 detik), mencegah pembacaan ulang SpreadsheetApp berulang saat banyak pengguna mengakses bersamaan.
+- **Smart Client Re-sync:** Klien `Index.html` mempertahankan status `SYNC_REVS` dan secara otomatis memicu sinkronisasi latar belakang saat pengguna beralih kembali ke tab aplikasi (`visibilitychange`).
+
 ---
 
 ## 5. Rincian Modul & Fitur Aplikasi
