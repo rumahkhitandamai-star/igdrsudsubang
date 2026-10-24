@@ -1,0 +1,36 @@
+{
+  "hosting": {
+    "site": "igdrsudsubang",
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "Kode.gs",
+      "appsscript.json",
+      "package.json",
+      "package-lock.json",
+      "AGENTS.md",
+      "prd.md",
+      "README.md",
+      "qc-test.spec.js"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/Index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "/Index.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      }
+    ]
+  }
+}
