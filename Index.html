@@ -5,6 +5,47 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>IGD RSUD Subang</title>
+  <!-- Auto-Bridge: Jika dibuka di hosting publik (Firebase Hosting), hubungkan langsung ke Backend Produksi GAS asli -->
+  <script>
+    (function() {
+      var GAS_EXEC_URL = "https://script.google.com/macros/s/AKfycbzdzfwzNOWKJEH1pCwqJyhfK3IaBCrKua0awE-GWOIGHZdXynQmMPc70Q2OoKlFfZIR/exec";
+      var isTopLevel = (window.self === window.top);
+      var isGas = (typeof window.google !== 'undefined' && typeof window.google.script !== 'undefined' && typeof window.google.script.run !== 'undefined');
+      var isLocalDev = (window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+      if (isTopLevel && !isGas && !isLocalDev) {
+        document.addEventListener('DOMContentLoaded', function() {
+          var splash = document.createElement('div');
+          splash.id = 'firebase-loader-screen';
+          splash.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:linear-gradient(135deg,#e0f2f1 0%,#b2dfdb 50%,#80cbc4 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999999;font-family:Segoe UI,sans-serif;color:#00796b;';
+          splash.innerHTML = '<img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ3RxAxKuitMYzC1YOTweb7HurIzOkHzL-fOQ&s" style="width:90px;height:90px;margin-bottom:18px;border-radius:50%;box-shadow:0 4px 12px rgba(0,0,0,0.15);" alt="Logo">' +
+            '<h3 style="margin:0 0 8px;font-weight:700;">IGD RSUD Subang</h3>' +
+            '<p style="margin:0;font-size:14px;color:#004d40;">Menghubungkan ke Database Produksi...</p>';
+          document.body.appendChild(splash);
+
+          var iframe = document.createElement('iframe');
+          iframe.id = 'gas-production-frame';
+          iframe.src = GAS_EXEC_URL + (window.location.search || '');
+          iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;border:none;margin:0;padding:0;z-index:999998;opacity:0;transition:opacity 0.4s ease;';
+          iframe.setAttribute('allow', 'clipboard-write; fullscreen');
+          
+          iframe.onload = function() {
+            iframe.style.opacity = '1';
+            if (splash && splash.parentNode) {
+              setTimeout(function() {
+                splash.style.transition = 'opacity 0.4s ease';
+                splash.style.opacity = '0';
+                setTimeout(function() {
+                  if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+                }, 400);
+              }, 300);
+            }
+          };
+          document.body.appendChild(iframe);
+        });
+      }
+    })();
+  </script>
   <!-- Library SheetJS dengan Dukungan Cell Styling untuk Export .xlsx -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
   <style>
