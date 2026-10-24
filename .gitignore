@@ -5,12 +5,17 @@ package-lock.json.backup
 # Apps Script (berisi Script ID & parentId)
 .clasp.json
 
-# Firebase
+# Firebase & Kredensial
 .firebase/
 firebase-debug.log*
 firestore-debug.log*
 ui-debug.log*
 .runtimeconfig.json
+.env*
+*service-account*.json
+serviceAccount*.json
+credentials*.json
+*.p8
 
 # Pengujian Sementara & Laporan Playwright
 qc-test.spec.js

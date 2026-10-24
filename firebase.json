@@ -5,7 +5,13 @@
     "ignore": [
       "firebase.json",
       "**/.*",
+      ".git/**",
+      "**/.git/**",
+      ".github/**",
+      "**/.github/**",
       "**/node_modules/**",
+      "test-results/**",
+      "playwright-report/**",
       "Kode.gs",
       "appsscript.json",
       "package.json",
@@ -23,7 +29,7 @@
     ],
     "headers": [
       {
-        "source": "/Index.html",
+        "source": "**",
         "headers": [
           {
             "key": "Cache-Control",

@@ -81,18 +81,23 @@ npm run deploy
 
 ---
 
-## 🔥 Pratinjau Publik via Firebase Hosting
+## 🔥 Akses Publik via Firebase Hosting
 
-Konfigurasi `firebase.json` dan `.firebaserc` disediakan untuk menyajikan `Index.html` sebagai demo/pratinjau publik statis.
+Domain publik aplikasi disajikan melalui Firebase Hosting dengan **Auto-Bridge Produksi**:
 
-> ⚠️ **Penting:**
-> Karena backend asli menggunakan `google.script.run` yang hanya aktif di lingkungan Google Apps Script, aplikasi yang di-hosting di Firebase akan berjalan dalam **Mode Pratinjau Lokal (Mock Engine)** menggunakan data `localStorage`. Firebase Hosting cocok untuk demonstrasi UI/UX, pengujian alur, atau staging tanpa mengubah database produksi.
-
-### Konfigurasi & URL Target Firebase
+- **Target URL Hosting:** [https://igdrsudsubang.web.app](https://igdrsudsubang.web.app) (atau [https://igdrsudsubang.firebaseapp.com](https://igdrsudsubang.firebaseapp.com))
 - **Project ID:** `khitandamai-9c7bf`
 - **Site ID:** `igdrsudsubang`
-- **Target URL Hosting:** [https://igdrsudsubang.web.app](https://igdrsudsubang.web.app) (atau [https://igdrsudsubang.firebaseapp.com](https://igdrsudsubang.firebaseapp.com))
 - **Akun Pengelola:** `rumahkhitandamai@gmail.com`
+
+### Mekanisme Koneksi & Keamanan
+1. **Auto-Bridge Produksi:**
+   Saat dibuka di domain Firebase Hosting publik, `Index.html` secara otomatis memuat Google Apps Script Web App Produksi melalui wrapper terintegrasi dengan penyamaran URL backend. Pengguna mendapatkan koneksi live ke database Google Sheets riil dengan favicon resmi RSUD Subang.
+2. **Keamanan Server-Side:**
+   - Seluruh endpoint pembacaan (`getAllSheetsData`, `getSheetData`) dan mutasi data (`saveData`, `deleteData`, `uploadSlideshowPhoto`, `backupDatabase`, `generateRetensiDoc`) diwajibkan menyertakan session token HMAC-SHA256 valid.
+   - `SESSION_SECRET` dienkripsi dan di-generate acak persisten menggunakan `PropertiesService` server-side.
+   - Kata sandi pada sheet `USERS` di-hash dengan SHA-256 bertingkat sebelum ditulis ke spreadsheet dan selalu dimasking (`••••••••`) pada respon klien.
+   - Metadata sensitif (`.git/**`, `.github/**`, dll) diblokir penuh dari deployment Firebase melalui deny-list `firebase.json`.
 
 ### Langkah Deploy ke Firebase
 1. Login ke akun Google pengelola Firebase:

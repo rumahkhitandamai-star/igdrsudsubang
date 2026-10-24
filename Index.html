@@ -12,7 +12,8 @@
   <!-- Auto-Bridge: Jika dibuka di hosting publik (Firebase Hosting), hubungkan langsung ke Backend Produksi GAS asli -->
   <script>
     (function() {
-      var GAS_EXEC_URL = "https://script.google.com/macros/s/AKfycbzdzfwzNOWKJEH1pCwqJyhfK3IaBCrKua0awE-GWOIGHZdXynQmMPc70Q2OoKlFfZIR/exec";
+      var _enc = "aHR0cHM6Ly9zY3JpcHQuZ29vZ2xlLmNvbS9tYWNyb3Mvcy9BS2Z5Y2J6ZHpmd3pOT1dLSkVIMXBDd3FKeWhmSzNJYUJDckt1YTBhd0UtR1dPSUdIWmRYeW5RbU1QYzcwUTJPb0tsRmZaSVIvZXhlYw==";
+      var GAS_EXEC_URL = (typeof window !== 'undefined' && window.atob) ? window.atob(_enc) : "";
       var isTopLevel = (window.self === window.top);
       var isGas = (typeof window.google !== 'undefined' && typeof window.google.script !== 'undefined' && typeof window.google.script.run !== 'undefined');
       var isLocalDev = (window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -1792,7 +1793,7 @@
             }
             return data;
           }
-          getAllSheetsData() {
+          getAllSheetsData(token) {
             const result = {};
             ['KUNJUNGAN', 'LIFE SAVING', 'KLB', 'RETENSI', 'IDUL FITRI', 'USERS', 'INVENTARIS ALAT KESEHATAN', 'INVENTARIS ALAT TENUN', 'INVENTARIS ALAT RUMAH TANGGA'].forEach(name => {
               const raw = getStorageSheet(name);
@@ -1800,12 +1801,19 @@
             });
             this._dispatch(result);
           }
-          getSheetData(sheetName) {
+          getSheetData(sheetName, token) {
             const raw = getStorageSheet(sheetName);
             this._dispatch((sheetName === 'USERS') ? this.maskMockPassword(raw) : raw);
           }
           authenticateUser(nama, password) {
             try {
+              const inputU = (nama || '').toString().trim().toLowerCase();
+              const inputP = (password || '').toString().trim();
+              if (!inputU || !inputP) {
+                this._dispatch({ status: false, message: 'Nama pengguna dan password wajib diisi.' });
+                return;
+              }
+
               const data = getStorageSheet('USERS');
               const headers = (data[0] || []).map(h => (h || '').toString().trim().toUpperCase());
               let idxNama = headers.findIndex(h => h === 'NAMA' || h === 'USERNAME' || h === 'USER' || h === 'NAMA PENGGUNA');
@@ -1816,8 +1824,6 @@
               if (idxNama === -1) idxNama = (headers.length > 2 && headers[0] === 'NO') ? 2 : 0;
               if (idxPwd === -1) idxPwd = (idxNama === 2) ? 3 : 1;
 
-              const inputU = (nama || '').toString().trim().toLowerCase();
-              const inputP = (password || '').toString().trim();
               for (let i = 1; i < data.length; i++) {
                 const u = (data[i][idxNama] || '').toString().trim().toLowerCase();
                 const p = (data[i][idxPwd] || '').toString().trim();
@@ -1951,10 +1957,10 @@
                 if (sheetName === 'RETENSI') {
                   const normJam_ = function(v) {
                     if (!v) return '';
-                    const s = v.toString().trim().toLowerCase();
-                    if (s.includes('07') || s.includes('7:') || s.includes('7.')) return '07:00';
-                    if (s.includes('19')) return '19:00';
-                    return s.replace(/\s*wib/g, '').replace(':', '.');
+                    const s = v.toString().trim().toLowerCase().replace(/\s*wib/g, '');
+                    if (s.startsWith('07') || s.startsWith('7.') || s.startsWith('7:') || /\b0?7[.:]00\b/.test(s)) return '07:00';
+                    if (s.startsWith('19') || /\b19[.:]00\b/.test(s)) return '19:00';
+                    return s.replace(':', '.');
                   };
 
                   const newDate = mockNormDate(rowData[2]);
@@ -2065,10 +2071,10 @@
                 if (sheetName === 'RETENSI') {
                   const normJam_ = function(v) {
                     if (!v) return '';
-                    const s = v.toString().trim().toLowerCase();
-                    if (s.includes('07') || s.includes('7:') || s.includes('7.')) return '07:00';
-                    if (s.includes('19')) return '19:00';
-                    return s.replace(/\s*wib/g, '').replace(':', '.');
+                    const s = v.toString().trim().toLowerCase().replace(/\s*wib/g, '');
+                    if (s.startsWith('07') || s.startsWith('7.') || s.startsWith('7:') || /\b0?7[.:]00\b/.test(s)) return '07:00';
+                    if (s.startsWith('19') || /\b19[.:]00\b/.test(s)) return '19:00';
+                    return s.replace(':', '.');
                   };
                   const newDate = mockNormDate(rowData[2]);
                   const newJam = normJam_(rowData[3]);
@@ -2252,7 +2258,7 @@
               this._dispatch(e, true);
             }
           }
-          generateRetensiDoc(docDataJson) {
+          generateRetensiDoc(docDataJson, token) {
             try {
               const parsed = (typeof docDataJson === 'string') ? JSON.parse(docDataJson) : (docDataJson || {});
               const placeholders = parsed.placeholders || {};
@@ -2609,7 +2615,9 @@
     }
 
     function syncSpreadsheetInBackground() {
-      if (typeof google !== 'undefined' && google.script) {
+      const token = getStoredToken();
+      if (!token) return;
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
         const thisSyncSeq = ++currentDataFetchSeq;
         google.script.run
           .withSuccessHandler(data => {
@@ -2652,7 +2660,7 @@
           .withFailureHandler(err => {
             console.warn("Gagal sinkronisasi background:", err);
           })
-          .getAllSheetsData();
+          .getAllSheetsData(token);
       } else {
         console.warn("Mode Pratinjau: API google.script.run tidak tersedia di luar environment Apps Script.");
       }
@@ -2774,6 +2782,9 @@
           }
         }
         showApp();
+        if (getStoredToken()) {
+          syncSpreadsheetInBackground();
+        }
       } else {
         document.getElementById('login-container').style.display = 'flex';
         initRememberMe();
@@ -2788,7 +2799,7 @@
       const btnLogin = document.querySelector('.btn-login');
 
       if (!nama || !pwd) {
-        msg.innerText = "Isi kredensial!";
+        msg.innerText = "Nama pengguna dan password wajib diisi!";
         msg.style.display = 'block';
         return;
       }
@@ -2814,6 +2825,7 @@
           if (tokenVal) sessionStorage.setItem('rsud_token', tokenVal);
         }
         showApp();
+        syncSpreadsheetInBackground();
       };
 
       msg.style.display = 'none';
@@ -4118,7 +4130,7 @@
             </td></tr>`;
           }
         })
-        .getSheetData(getTargetSheet(currentMenu));
+        .getSheetData(getTargetSheet(currentMenu), getStoredToken());
     }
 
     function updateDinamisFilters(data) {
@@ -4601,6 +4613,21 @@
       const kData = CACHE['Kunjungan'] || [];
       let totalKunjunganToday = 0;
       let katCount = { 'Anak': 0, 'Bedah': 0, 'Non Bedah': 0, 'Kebidanan': 0 };
+      
+      let latestShift = null;
+      const shiftPriority = { 'malam': 3, 'sore': 2, 'pagi': 1 };
+      let maxPriority = 0;
+      for (let i = 1; i < kData.length; i++) {
+        if (normalizeDateStr(kData[i][2]) === todayISO) {
+          const sh = (kData[i][3] || '').toString().trim().toLowerCase();
+          const prio = shiftPriority[sh] || 0;
+          if (prio > maxPriority) {
+            maxPriority = prio;
+            latestShift = sh;
+          }
+        }
+      }
+
       let sisaRetensiTerbaru = 0;
       for (let i = 1; i < kData.length; i++) {
         if (normalizeDateStr(kData[i][2]) === todayISO) {
@@ -4608,8 +4635,11 @@
           totalKunjunganToday += tot;
           const kat = (kData[i][4] || '').toString().trim();
           if (katCount[kat] !== undefined) katCount[kat] += tot;
-          const retH = parseFloat(kData[i][25]) || 0;
-          sisaRetensiTerbaru = Math.max(sisaRetensiTerbaru, retH);
+
+          const sh = (kData[i][3] || '').toString().trim().toLowerCase();
+          if (latestShift && sh === latestShift) {
+            sisaRetensiTerbaru += (parseFloat(kData[i][25]) || 0);
+          }
         }
       }
 
@@ -5160,7 +5190,7 @@
           resetExportState();
           showToast('Gagal memproses Word: ' + (err.message || err));
         })
-        .generateRetensiDoc(JSON.stringify(docData));
+        .generateRetensiDoc(JSON.stringify(docData), getStoredToken());
     }
 
     // --- FUNGSI EXPORT EXCEL ---
@@ -5207,7 +5237,7 @@
             };
             onFinish(fallbackData);
           })
-          .getAllSheetsData();
+          .getAllSheetsData(getStoredToken());
       } else {
         const fallbackData = {
           'INVENTARIS ALAT KESEHATAN': CACHE['Inventaris Alat Kesehatan'] || [],
@@ -5479,51 +5509,57 @@
       if (menuKey === 'KLB') {
         const start = document.getElementById('filter-klb-start').value, end = document.getElementById('filter-klb-end').value;
         const fy = document.getElementById('filter-klb-tahun').value, fm = document.getElementById('filter-klb-bulan').value;
+        const fYear = fy ? parseInt(fy, 10) : null;
+        const fMonth = fm ? parseInt(fm, 10) : null;
         const fe = document.getElementById('filter-klb-kejadian').value;
         const fKet = document.getElementById('filter-klb-keterangan') ? document.getElementById('filter-klb-keterangan').value : "";
         const fSearch = document.getElementById('filter-klb-search') ? document.getElementById('filter-klb-search').value.trim().toLowerCase() : "";
         
+        const sd = start ? new Date(start) : null, ed = end ? new Date(end) : null;
+        if (sd) sd.setHours(0,0,0,0);
+        if (ed) ed.setHours(23,59,59,999);
+
+        let suffixParts = [];
         if (start || end) {
-          fileNameSuffix = `${start}_sd_${end}`;
-          const sd = start ? new Date(start) : null, ed = end ? new Date(end) : null;
-          if(sd) sd.setHours(0,0,0,0); if(ed) ed.setHours(23,59,59,999);
-          for (let i = 1; i < dataRaw.length; i++) {
-            let dateVal = (typeof normalizeDateStr === 'function') ? normalizeDateStr(dataRaw[i][3]) : dataRaw[i][3];
-            let d = new Date(dateVal);
-            if (isNaN(d.getTime())) d = new Date(dataRaw[i][3]);
-            if (!isNaN(d.getTime())) { d.setHours(12,0,0,0); if ((!sd || d >= sd) && (!ed || d <= ed)) filteredData.push(dataRaw[i]); }
-          }
-        } else if (fy || fm) {
-          fileNameSuffix = `${fm ? 'Bulan_' + fm : 'SemuaBulan'}_${fy ? 'Tahun_' + fy : 'SemuaTahun'}`;
-          for (let i = 1; i < dataRaw.length; i++) {
-            let dateVal = (typeof normalizeDateStr === 'function') ? normalizeDateStr(dataRaw[i][3]) : dataRaw[i][3];
-            let d = new Date(dateVal);
-            if (isNaN(d.getTime())) d = new Date(dataRaw[i][3]);
+          suffixParts.push(`${start || 'Awal'}_sd_${end || 'Akhir'}`);
+        } else if (fYear || fMonth) {
+          suffixParts.push(`${fMonth ? 'Bulan_' + fMonth : 'SemuaBulan'}_${fYear ? 'Tahun_' + fYear : 'SemuaTahun'}`);
+        }
+        if (fe) suffixParts.push(`Kejadian_${fe}`);
+        if (fKet) suffixParts.push(`Keterangan_${fKet}`);
+        fileNameSuffix = suffixParts.join('_') || 'Semua';
+
+        for (let i = 1; i < dataRaw.length; i++) {
+          let dateVal = (typeof normalizeDateStr === 'function') ? normalizeDateStr(dataRaw[i][3]) : dataRaw[i][3];
+          let d = new Date(dateVal);
+          if (isNaN(d.getTime())) d = new Date(dataRaw[i][3]);
+          let match = true;
+
+          if (start || end) {
             if (!isNaN(d.getTime())) {
-              if (fy && d.getFullYear() != fy) continue;
-              if (fm && (d.getMonth() + 1) != fm) continue;
-              filteredData.push(dataRaw[i]);
+              d.setHours(12,0,0,0);
+              if (sd && d < sd) match = false;
+              if (ed && d > ed) match = false;
+            } else {
+              match = false;
+            }
+          } else {
+            if (!isNaN(d.getTime())) {
+              if (fYear !== null && d.getFullYear() !== fYear) match = false;
+              if (fMonth !== null && (d.getMonth() + 1) !== fMonth) match = false;
+            } else if (fYear !== null || fMonth !== null) {
+              match = false;
             }
           }
-        } else if (fe) {
-          fileNameSuffix = `Kejadian_${fe}`;
-          for (let i = 1; i < dataRaw.length; i++) if (dataRaw[i][2] === fe) filteredData.push(dataRaw[i]);
-        } else if (fKet) {
-          fileNameSuffix = `Keterangan_${fKet}`;
-          for (let i = 1; i < dataRaw.length; i++) if (dataRaw[i][14] === fKet) filteredData.push(dataRaw[i]);
-        } else {
-          filteredData = dataRaw.slice();
-        }
 
-        if (fSearch) {
-          filteredData = [filteredData[0]].concat(filteredData.slice(1).filter(row => {
-            const rowId = String(row[1] || '').toLowerCase();
-            const rowKejadian = String(row[2] || '').toLowerCase();
-            const rowCm = String(row[5] || '').toLowerCase();
-            const rowNama = String(row[6] || '').toLowerCase();
-            const rowDiag = String(row[11] || '').toLowerCase();
-            return rowId.includes(fSearch) || rowKejadian.includes(fSearch) || rowCm.includes(fSearch) || rowNama.includes(fSearch) || rowDiag.includes(fSearch);
-          }));
+          if (fe && dataRaw[i][2] !== fe) match = false;
+          if (fKet && dataRaw[i][14] !== fKet) match = false;
+          if (fSearch) {
+            const rowStr = dataRaw[i].join(' ').toLowerCase();
+            if (!rowStr.includes(fSearch)) match = false;
+          }
+
+          if (match) filteredData.push(dataRaw[i]);
         }
       } else if (menuKey === 'Idul Fitri') {
         const fy = document.getElementById('filter-idulfitri-tahun').value;
@@ -6777,10 +6813,10 @@
       
       const normRetensiJam = function(s) {
         if (!s) return '';
-        const v = s.toString().trim().toLowerCase();
-        if (v.includes('07') || v.includes('7:') || v.includes('7.')) return '07:00';
-        if (v.includes('19')) return '19:00';
-        return v.replace(/\s*wib/g, '').replace(':', '.');
+        const v = s.toString().trim().toLowerCase().replace(/\s*wib/g, '');
+        if (v.startsWith('07') || v.startsWith('7.') || v.startsWith('7:') || /\b0?7[.:]00\b/.test(v)) return '07:00';
+        if (v.startsWith('19') || /\b19[.:]00\b/.test(v)) return '19:00';
+        return v.replace(':', '.');
       };
       
       const selDate = normalizeDateStr(dateInput.value); 
@@ -7855,6 +7891,10 @@
       if (!lastDeletedItem) return;
       const { menu, sheetName, row } = lastDeletedItem;
       lastDeletedItem = null;
+      if (sheetName === 'USERS') {
+        showToast('⚠️ Pemulihan akun pengguna tidak didukung karena keamanan kata sandi.');
+        return;
+      }
       showToast('⏳ Memulihkan data ID ' + (row[1] || '') + '...');
       google.script.run
         .withSuccessHandler(updated => {
@@ -7885,11 +7925,12 @@
           CACHE[currentMenu] = updated; 
           if (loader) loader.style.display = 'none'; 
           applyDataFiltering(updated); 
-          if (foundRow) {
+          if (foundRow && targetSheet !== 'USERS') {
             lastDeletedItem = { menu: currentMenu, sheetName: targetSheet, row: foundRow.slice() };
             showToast('🗑️ Data ID ' + id + ' berhasil dihapus.', 'Urungkan', () => undoLastDelete(), 6000);
           } else {
-            showToast('🗑️ Data ID ' + id + ' berhasil dihapus.');
+            lastDeletedItem = null;
+            showToast(targetSheet === 'USERS' ? '🗑️ Akun pengguna ID ' + id + ' berhasil dihapus.' : '🗑️ Data ID ' + id + ' berhasil dihapus.');
           }
         })
         .withFailureHandler(err => {

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Aplikasi Web IGD RSUD Subang",
   "scripts": {
-    "test": "npx playwright test qc-test.spec.js --headed",
+    "test": "npx playwright test --headed",
     "push": "clasp push -f",
     "deploy": "clasp deploy -i AKfycbzdzfwzNOWKJEH1pCwqJyhfK3IaBCrKua0awE-GWOIGHZdXynQmMPc70Q2OoKlFfZIR -d \"Auto Deploy\"",
     "deploy:firebase": "firebase deploy --only hosting",

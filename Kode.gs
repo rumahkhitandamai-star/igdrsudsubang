@@ -3,7 +3,28 @@ const SHEET_ID = '16abr7-2np5jY5uG6G16fAjDPoFa_4wVUHxVxxsv3PWw';
 const FOLDER_ID = '1OlYaZMxUOQFGmS1L_R9t2p45ZcKr3v9K'; // Folder Ekspor & Arsip
 const SLIDESHOW_FOLDER_ID = '1R6S-RavuW1z6RO3g_CcBvU2kqbhgAycj'; // Folder 9 Foto Slideshow Beranda
 const BACKUP_FOLDER_ID = '1Y7HY4BO5NtEdJ7Y8ds68WJwoeffECKqR'; // Folder Backup Database IGD
-const SESSION_SECRET = SHEET_ID + '_igd_subang_sec_salt_2026';
+function getSessionSecret_() {
+  const props = PropertiesService.getScriptProperties();
+  let secret = props.getProperty('IGD_SESSION_SECRET');
+  if (!secret) {
+    secret = Utilities.getUuid() + '_' + Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Math.random().toString() + '_' + Date.now()));
+    props.setProperty('IGD_SESSION_SECRET', secret);
+  }
+  return secret;
+}
+
+const ALLOWED_SHEETS = [
+  'USERS', 'KUNJUNGAN', 'LIFE SAVING', 'KLB', 'RETENSI', 'IDUL FITRI',
+  'INVENTARIS ALAT KESEHATAN', 'INVENTARIS ALAT TENUN', 'INVENTARIS ALAT RUMAH TANGGA'
+];
+
+function normalizeRetensiJam_(v) {
+  if (!v) return '';
+  const s = v.toString().trim().toLowerCase().replace(/\s*wib/g, '');
+  if (s.startsWith('07') || s.startsWith('7.') || s.startsWith('7:') || /\b0?7[.:]00\b/.test(s)) return '07:00';
+  if (s.startsWith('19') || /\b19[.:]00\b/.test(s)) return '19:00';
+  return s.replace(':', '.');
+}
 
 // ==========================================
 // 0. KEAMANAN & MANAJEMEN SESI SERVER-SIDE
@@ -17,7 +38,8 @@ function hashPassword_(pwd) {
 function createSessionToken_(user, role, otorisasi) {
   const timestamp = Date.now();
   const payload = [user, role, otorisasi || '', timestamp].join('|');
-  const sigBytes = Utilities.computeHmacSha256Signature(payload, SESSION_SECRET);
+  const secret = getSessionSecret_();
+  const sigBytes = Utilities.computeHmacSha256Signature(payload, secret);
   const sig = Utilities.base64Encode(sigBytes);
   return Utilities.base64Encode(Utilities.newBlob(payload + ':::' + sig).getBytes());
 }
@@ -30,7 +52,8 @@ function verifySessionToken_(token) {
     if (parts.length !== 2) return null;
     const payload = parts[0];
     const sig = parts[1];
-    const expectedSigBytes = Utilities.computeHmacSha256Signature(payload, SESSION_SECRET);
+    const secret = getSessionSecret_();
+    const expectedSigBytes = Utilities.computeHmacSha256Signature(payload, secret);
     const expectedSig = Utilities.base64Encode(expectedSigBytes);
     if (sig !== expectedSig) return null;
 
@@ -53,8 +76,10 @@ function assertUserCanAccess_(session, sheetName, action) {
     throw new Error('Sesi tidak valid atau telah kedaluwarsa. Silakan login kembali.');
   }
 
+  const roleLower = (session.role || '').toLowerCase().trim();
+
   // Super Admin memiliki akses penuh ke seluruh sheet
-  if (session.role === 'Super Admin') return true;
+  if (roleLower === 'super admin' || roleLower === 'superadmin') return true;
 
   // Pengelolaan sheet USERS dibatasi khusus Super Admin
   if (sheetName === 'USERS') {
@@ -63,7 +88,7 @@ function assertUserCanAccess_(session, sheetName, action) {
 
   // Validasi OTORISASI menu
   const auths = (session.otorisasi || '').split(',').map(function(s) { return s.trim().toLowerCase(); });
-  const sLower = (sheetName || '').toLowerCase();
+  const sLower = (sheetName || '').toLowerCase().trim();
   const matched = auths.some(function(a) {
     if (a === sLower) return true;
     if (sLower.indexOf('inventaris') === 0 && a.indexOf('inventaris') >= 0) return true;
@@ -74,7 +99,7 @@ function assertUserCanAccess_(session, sheetName, action) {
     if (!matched) {
       throw new Error('Akses Ditolak: Anda tidak memiliki hak akses ke modul ' + sheetName + '.');
     }
-  } else if (!matched && session.role !== 'Admin') {
+  } else if (!matched && roleLower !== 'admin') {
     throw new Error('Akses Ditolak: Anda tidak memiliki hak akses ke modul ' + sheetName + '.');
   }
 
@@ -260,6 +285,10 @@ function authenticateUser(nama, password) {
     const inputU = (nama || '').toString().trim().toLowerCase();
     const inputP = (password || '').toString().trim();
 
+    if (!inputU || !inputP) {
+      return { status: false, message: 'Nama pengguna dan password wajib diisi.' };
+    }
+
     for (let i = 1; i < data.length; i++) {
       const u = (data[i][idxNama] || '').toString().trim().toLowerCase();
       const p = (data[i][idxPwd] || '').toString().trim();
@@ -333,16 +362,23 @@ function ensureInventarisSheets() {
   }
 }
 
-function getAllSheetsData() {
+function getAllSheetsData(token) {
+  const session = verifySessionToken_(token);
+  if (!session) {
+    throw new Error('Sesi tidak valid atau telah kedaluwarsa. Silakan login kembali.');
+  }
+
   ensureUsersSheetStructure();
   ensureInventarisSheets();
   const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sheetNames = [
-    'KUNJUNGAN', 'LIFE SAVING', 'KLB', 'RETENSI', 'IDUL FITRI', 'USERS',
-    'INVENTARIS ALAT KESEHATAN', 'INVENTARIS ALAT TENUN', 'INVENTARIS ALAT RUMAH TANGGA'
-  ];
   const result = {};
-  sheetNames.forEach(name => {
+  const roleLower = (session.role || '').toLowerCase().trim();
+
+  ALLOWED_SHEETS.forEach(name => {
+    if (name === 'USERS' && roleLower !== 'super admin' && roleLower !== 'superadmin') {
+      result[name] = [];
+      return;
+    }
     const sheet = ss.getSheetByName(name);
     if (sheet) {
       const vals = sheet.getDataRange().getDisplayValues();
@@ -354,7 +390,14 @@ function getAllSheetsData() {
   return result;
 }
 
-function getSheetData(sheetName) {
+function getSheetData(sheetName, token) {
+  if (!ALLOWED_SHEETS.includes(sheetName)) {
+    throw new Error('Akses Ditolak: Modul sheet "' + sheetName + '" tidak diizinkan.');
+  }
+
+  const session = verifySessionToken_(token);
+  assertUserCanAccess_(session, sheetName, 'read');
+
   if (sheetName === 'USERS') {
     ensureUsersSheetStructure();
   }
@@ -429,6 +472,10 @@ function normalizeDateStr_(val) {
 }
 
 function saveData(sheetName, rowData, isUpdate, token) {
+  if (!ALLOWED_SHEETS.includes(sheetName)) {
+    throw new Error('Akses Ditolak: Modul sheet "' + sheetName + '" tidak diizinkan.');
+  }
+
   const session = verifySessionToken_(token);
   assertUserCanAccess_(session, sheetName, isUpdate ? 'update' : 'create');
 
@@ -533,19 +580,11 @@ function saveData(sheetName, rowData, isUpdate, token) {
       // Validasi keunikan khusus sheet RETENSI (TANGGAL + JAM)
       if (sheetName === 'RETENSI') {
         const existingData = sheet.getDataRange().getDisplayValues();
-        const normJam_ = function(v) {
-          if (!v) return '';
-          const s = v.toString().trim().toLowerCase();
-          if (s.includes('07') || s.includes('7:') || s.includes('7.')) return '07:00';
-          if (s.includes('19')) return '19:00';
-          return s.replace(/\s*wib/g, '').replace(':', '.');
-        };
-
         const newDate = normalizeDateStr_(cleanRowData[2]);
-        const newJam = normJam_(cleanRowData[3]);
+        const newJam = normalizeRetensiJam_(cleanRowData[3]);
         for (let i = 1; i < existingData.length; i++) {
           const rowDate = normalizeDateStr_(existingData[i][2]);
-          const rowJam = normJam_(existingData[i][3]);
+          const rowJam = normalizeRetensiJam_(existingData[i][3]);
           if (rowDate === newDate && rowJam === newJam) {
             throw new Error('Laporan Retensi untuk Jam ' + (cleanRowData[3] || '') + ' pada tanggal ' + (cleanRowData[2] || '') + ' sudah ada di server.');
           }
@@ -574,7 +613,7 @@ function saveData(sheetName, rowData, isUpdate, token) {
         }
       }
 
-      // Validasi keunikan khusus sheet USERS (NAMA / Username)
+      // Validasi keunikan khusus sheet USERS (NAMA / Username) & Hash Password
       if (sheetName === 'USERS') {
         const existingData = sheet.getDataRange().getDisplayValues();
         const newNama = (cleanRowData[2] || '').toString().trim().toLowerCase();
@@ -583,10 +622,13 @@ function saveData(sheetName, rowData, isUpdate, token) {
             throw new Error('Nama pengguna "' + cleanRowData[2] + '" sudah terdaftar.');
           }
         }
+        // Hash password baru sebelum simpan
+        const rawPwd = (cleanRowData[3] || '').toString().trim();
+        cleanRowData[3] = rawPwd ? hashPassword_(rawPwd) : '';
       }
 
-      // Validasi keunikan ID (Index 1)
-      const existingData = sheet.getDataRange().getValues();
+      // Validasi keunikan ID (Index 1) menggunakan display values
+      const existingData = sheet.getDataRange().getDisplayValues();
       const newId = String(cleanRowData[1] || '').trim();
       for (let i = 1; i < existingData.length; i++) {
         if (String(existingData[i][1]).trim() === newId) {
@@ -597,13 +639,12 @@ function saveData(sheetName, rowData, isUpdate, token) {
 
       sheet.appendRow(cleanRowData);
     } else {
-      const data = sheet.getDataRange().getValues();
+      const displayData = sheet.getDataRange().getDisplayValues();
       const idToFind = String(cleanRowData[1]).trim();
       let found = false;
 
       // Validasi keunikan khusus sheet KUNJUNGAN saat update
       if (sheetName === 'KUNJUNGAN') {
-        const displayData = sheet.getDataRange().getDisplayValues();
         const newDate = normalizeDateStr_(cleanRowData[2]);
         const newShift = (cleanRowData[3] || '').toString().trim().toLowerCase();
         const newKat = (cleanRowData[4] || '').toString().trim().toLowerCase();
@@ -621,7 +662,6 @@ function saveData(sheetName, rowData, isUpdate, token) {
 
       // Validasi keunikan khusus sheet LIFE SAVING saat update
       if (sheetName === 'LIFE SAVING') {
-        const displayData = sheet.getDataRange().getDisplayValues();
         const newDate = normalizeDateStr_(cleanRowData[2]);
         const newShift = (cleanRowData[3] || '').toString().trim().toLowerCase();
         const newNama = (cleanRowData[4] || '').toString().trim().toUpperCase();
@@ -646,7 +686,6 @@ function saveData(sheetName, rowData, isUpdate, token) {
 
       // Validasi keunikan khusus sheet KLB saat update
       if (sheetName === 'KLB') {
-        const displayData = sheet.getDataRange().getDisplayValues();
         const newKejadian = (cleanRowData[2] || '').toString().trim().toLowerCase();
         const newDate = normalizeDateStr_(cleanRowData[3]);
         const newCm = (cleanRowData[5] || '').toString().trim();
@@ -671,21 +710,13 @@ function saveData(sheetName, rowData, isUpdate, token) {
 
       // Validasi keunikan khusus sheet RETENSI saat update
       if (sheetName === 'RETENSI') {
-        const displayData = sheet.getDataRange().getDisplayValues();
-        const normJam_ = function(v) {
-          if (!v) return '';
-          const s = v.toString().trim().toLowerCase();
-          if (s.includes('07') || s.includes('7:') || s.includes('7.')) return '07:00';
-          if (s.includes('19')) return '19:00';
-          return s.replace(/\s*wib/g, '').replace(':', '.');
-        };
         const newDate = normalizeDateStr_(cleanRowData[2]);
-        const newJam = normJam_(cleanRowData[3]);
+        const newJam = normalizeRetensiJam_(cleanRowData[3]);
         for (let i = 1; i < displayData.length; i++) {
           const rowId = String(displayData[i][1]).trim();
           if (rowId !== idToFind) {
             const rowDate = normalizeDateStr_(displayData[i][2]);
-            const rowJam = normJam_(displayData[i][3]);
+            const rowJam = normalizeRetensiJam_(displayData[i][3]);
             if (rowDate === newDate && rowJam === newJam) {
               throw new Error('Laporan Retensi untuk Jam ' + (cleanRowData[3] || '') + ' pada tanggal ' + (cleanRowData[2] || '') + ' sudah digunakan oleh data lain di server.');
             }
@@ -695,7 +726,6 @@ function saveData(sheetName, rowData, isUpdate, token) {
 
       // Validasi keunikan khusus sheet IDUL FITRI saat update
       if (sheetName === 'IDUL FITRI') {
-        const displayData = sheet.getDataRange().getDisplayValues();
         const newTahun = (cleanRowData[2] || '').toString().trim().toLowerCase();
         const newDate = normalizeDateStr_(cleanRowData[3]);
         const newCm = (cleanRowData[5] || '').toString().trim();
@@ -720,22 +750,25 @@ function saveData(sheetName, rowData, isUpdate, token) {
 
       // Validasi keunikan khusus sheet USERS saat update (NAMA tidak boleh duplikat dengan akun lain)
       if (sheetName === 'USERS') {
+        const rawValues = sheet.getDataRange().getValues();
         const newNama = (cleanRowData[2] || '').toString().trim().toLowerCase();
-        for (let i = 1; i < data.length; i++) {
-          if (String(data[i][1]).trim() !== idToFind && (data[i][2] || '').toString().trim().toLowerCase() === newNama) {
+        for (let i = 1; i < displayData.length; i++) {
+          if (String(displayData[i][1]).trim() !== idToFind && (displayData[i][2] || '').toString().trim().toLowerCase() === newNama) {
             throw new Error('Nama pengguna "' + cleanRowData[2] + '" sudah digunakan oleh akun lain.');
           }
-          if (String(data[i][1]).trim() === idToFind) {
+          if (String(displayData[i][1]).trim() === idToFind) {
             const incomingPwd = (cleanRowData[3] || '').toString().trim();
             if (!incomingPwd || incomingPwd === '••••••••') {
-              cleanRowData[3] = data[i][3]; // Pertahankan password lama jika tidak diubah
+              cleanRowData[3] = rawValues[i][3]; // Pertahankan password hash lama
+            } else {
+              cleanRowData[3] = hashPassword_(incomingPwd); // Hash password baru
             }
           }
         }
       }
 
-      for (let i = 1; i < data.length; i++) {
-        if (String(data[i][1]).trim() === idToFind) {
+      for (let i = 1; i < displayData.length; i++) {
+        if (String(displayData[i][1]).trim() === idToFind) {
           sheet.getRange(i + 1, 1, 1, cleanRowData.length).setValues([cleanRowData]);
           found = true;
           break;
@@ -748,13 +781,17 @@ function saveData(sheetName, rowData, isUpdate, token) {
     // Lakukan Penomoran Ulang setelah simpan/update
     renumberSheet(sheetName);
     // Kembalikan data terbaru untuk Cache FrontEnd
-    return getSheetData(sheetName);
+    return getSheetData(sheetName, token);
   } finally {
     lock.releaseLock();
   }
 }
 
 function deleteData(sheetName, id, token) {
+  if (!ALLOWED_SHEETS.includes(sheetName)) {
+    throw new Error('Akses Ditolak: Modul sheet "' + sheetName + '" tidak diizinkan.');
+  }
+
   const session = verifySessionToken_(token);
   assertUserCanAccess_(session, sheetName, 'delete');
 
@@ -763,7 +800,7 @@ function deleteData(sheetName, id, token) {
   try {
     const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(sheetName);
     if (!sheet) throw new Error('Sheet ' + sheetName + ' tidak ditemukan.');
-    const data = sheet.getDataRange().getValues();
+    const data = sheet.getDataRange().getDisplayValues();
     const idToFind = String(id).trim();
     let found = false;
     for (let i = 1; i < data.length; i++) {
@@ -777,7 +814,7 @@ function deleteData(sheetName, id, token) {
       throw new Error('Data dengan ID ' + id + ' tidak ditemukan di server.');
     }
     renumberSheet(sheetName);
-    return getSheetData(sheetName);
+    return getSheetData(sheetName, token);
   } finally {
     lock.releaseLock();
   }
@@ -850,13 +887,20 @@ function getSlideshowImages() {
 function uploadSlideshowPhoto(slotIndex, base64Data, mimeType, token) {
   try {
     const session = verifySessionToken_(token);
-    if (!session || session.role !== 'Super Admin') {
+    const roleLower = (session && session.role ? session.role : '').toLowerCase().trim();
+    if (roleLower !== 'super admin' && roleLower !== 'superadmin') {
       return { success: false, message: 'Akses Ditolak: Hanya Super Admin yang berwenang mengunggah foto slideshow.' };
     }
 
     const slot = parseInt(slotIndex, 10);
     if (isNaN(slot) || slot < 1 || slot > 9) {
       return { success: false, message: 'Nomor slot tidak valid (wajib 1 - 9).' };
+    }
+
+    const cleanMime = (mimeType || 'image/jpeg').toLowerCase().trim();
+    const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedMimes.includes(cleanMime)) {
+      return { success: false, message: 'Format gambar tidak didukung (hanya JPG, PNG, atau WEBP).' };
     }
     
     const folder = DriveApp.getFolderById(SLIDESHOW_FOLDER_ID);
@@ -878,9 +922,10 @@ function uploadSlideshowPhoto(slotIndex, base64Data, mimeType, token) {
       cleanBase64 = cleanBase64.split(',')[1];
     }
     
-    const contentType = mimeType || 'image/jpeg';
+    const contentType = cleanMime === 'image/jpg' ? 'image/jpeg' : cleanMime;
     const decodedBytes = Utilities.base64Decode(cleanBase64);
-    const fileName = 'slideshow_' + slot + '.jpg';
+    const ext = cleanMime.indexOf('png') >= 0 ? '.png' : (cleanMime.indexOf('webp') >= 0 ? '.webp' : '.jpg');
+    const fileName = 'slideshow_' + slot + ext;
     const blob = Utilities.newBlob(decodedBytes, contentType, fileName);
     
     const newFile = folder.createFile(blob);
@@ -901,7 +946,8 @@ function uploadSlideshowPhoto(slotIndex, base64Data, mimeType, token) {
 function deleteSlideshowPhoto(slotIndex, token) {
   try {
     const session = verifySessionToken_(token);
-    if (!session || session.role !== 'Super Admin') {
+    const roleLower = (session && session.role ? session.role : '').toLowerCase().trim();
+    if (roleLower !== 'super admin' && roleLower !== 'superadmin') {
       return { success: false, message: 'Akses Ditolak: Hanya Super Admin yang berwenang menghapus foto slideshow.' };
     }
 
@@ -938,7 +984,8 @@ function deleteSlideshowPhoto(slotIndex, token) {
 function backupDatabase(token) {
   try {
     const session = verifySessionToken_(token);
-    if (!session || session.role !== 'Super Admin') {
+    const roleLower = (session && session.role ? session.role : '').toLowerCase().trim();
+    if (roleLower !== 'super admin' && roleLower !== 'superadmin') {
       return { success: false, message: 'Akses Ditolak: Hanya Super Admin yang berwenang melakukan backup database.' };
     }
 
@@ -977,7 +1024,8 @@ function backupDatabase(token) {
 function listDatabaseBackups(token) {
   try {
     const session = verifySessionToken_(token);
-    if (!session || session.role !== 'Super Admin') {
+    const roleLower = (session && session.role ? session.role : '').toLowerCase().trim();
+    if (roleLower !== 'super admin' && roleLower !== 'superadmin') {
       return { success: false, message: 'Akses Ditolak: Hanya Super Admin yang berwenang melihat riwayat backup.', backups: [] };
     }
 
@@ -1057,9 +1105,12 @@ function cleanupOldTempExports() {
 // ==========================================
 // 6. EXPORT WORD (KHUSUS RETENSI)
 // ==========================================
-function generateRetensiDoc(docData) {
+function generateRetensiDoc(docData, token) {
   let newFile = null;
   try {
+    const session = verifySessionToken_(token);
+    assertUserCanAccess_(session, 'RETENSI', 'export');
+
     // Bersihkan berkas sementara terdahulu di Google Drive
     cleanupOldTempExports();
 

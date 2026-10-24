@@ -55,8 +55,8 @@ igd_rsudsubang/
    - Pencegahan duplikasi Retensi: Kombinasi `TANGGAL + JAM` tidak boleh ganda.
    - Pencegahan duplikasi Idul Fitri: Kombinasi `TAHUN + TANGGAL MASUK + (NAMA PASIEN / CM)` tidak boleh ganda (divalidasi di client, mock, & backend).
    - Validasi Idul Fitri: Wajib isi Tahun, Tanggal Masuk, Jam Masuk (format `08.00`), dan Nama Pasien. Tanggal/Jam Keluar harus $\ge$ Masuk.
-   - Keamanan & Sesi Server: Mutasi data (`saveData`, `deleteData`, `uploadSlideshowPhoto`) wajib menyertakan signed HMAC session token dari `authenticateUser`. Kolom password pada sheet `USERS` otomatis dimask (`••••••••`) pada response client.
-   - Proteksi Hapus: Menghapus data shift Kunjungan memicu peringatan integritas jika shift berikutnya sudah ada. Klien mendukung tombol "Urungkan" sesaat setelah penghapusan data.
+   - Keamanan & Sesi Server: Seluruh pembacaan data (`getAllSheetsData`, `getSheetData`) dan mutasi data (`saveData`, `deleteData`, `uploadSlideshowPhoto`, `backupDatabase`, `generateRetensiDoc`) WAJIB menyertakan signed HMAC session token dari `authenticateUser`. `SESSION_SECRET` dienkripsi persisten via `PropertiesService` server-side. Kolom password pada sheet `USERS` di-hash dengan SHA-256 dan dimask (`••••••••`) pada response client. Pemulihan (Undo) penghapusan akun USERS diblokir demi proteksi kata sandi.
+   - Proteksi Hapus: Menghapus data shift Kunjungan memicu peringatan integritas jika shift berikutnya sudah ada. Klien mendukung tombol "Urungkan" sesaat setelah penghapusan data (kecuali USERS).
    - Jika validasi gagal, tombol simpan dinonaktifkan atau alert dipicu. Jangan menghilangkan validasi ini.
 4. **ID & Kredensial Hardcoded**:
    - `SHEET_ID`: Hardcoded di `Kode.gs`.
