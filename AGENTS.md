@@ -64,7 +64,7 @@ igd_rsudsubang/
    - Jika validasi gagal, tombol simpan dinonaktifkan atau alert dipicu. Jangan menghilangkan validasi ini.
 4. **ID & Kredensial Hardcoded**:
    - `SHEET_ID`: Hardcoded di `Kode.gs`.
-   - `FOLDER_ID`: Hardcoded di `Kode.gs` (folder berkas umum & subfolder `Temp_Exports`).
+   - `FOLDER_ID`: Hardcoded di `Kode.gs` (`1roxR2bu5O-Q1O05bjvh9_N69QHXw8NZ_` untuk folder berkas umum & subfolder `Temp_Exports`).
    - `SLIDESHOW_FOLDER_ID`: Hardcoded di `Kode.gs` (`1R6S-RavuW1z6RO3g_CcBvU2kqbhgAycj` untuk 9 foto slideshow 440×320).
    - `templateId` Dokumen Word Retensi: Hardcoded di `Kode.gs` dan `Index.html` (`1DN_-I9XkF_dTzExMVyGwYRs4cqGw5eAsoEtRCX8s4bM`).
    - **Hak Akses Modal & CRUD**: Seluruh peran terotorisasi (Admin dan User/Visitor) memiliki Hak Akses Penuh (Tambah, Edit, Hapus, Export Word/Excel) pada menu yang diotorisasikan. Akun hardcoded `visitor / 127` telah dihapus; login wajib menggunakan akun valid pada sheet `USERS`.

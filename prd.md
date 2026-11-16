@@ -45,7 +45,7 @@ Instalasi Gawat Darurat (IGD) RSUD Subang memerlukan sistem digital terpusat, ce
 - **Database Engine:** Google Sheets melalui layanan `SpreadsheetApp`.
   - Serialisasi data aman menggunakan metode `getDisplayValues()` untuk menjaga format teks tanggal tanpa galat pergeseran zona waktu.
 - **Media & Ekspor Dokumen:**
-  - Google Drive (`DriveApp`): Mengambil dan mengelola 9 foto slideshow dari folder ID khusus (`SLIDESHOW_FOLDER_ID`: `1R6S-RavuW1z6RO3g_CcBvU2kqbhgAycj`) dengan konversi otomatis ke link thumbnail resolusi ultra tinggi (`sz=w1920`) serta folder berkas umum/ekspor (`FOLDER_ID`: `1OlYaZMxUOQFGmS1L_R9t2p45ZcKr3v9K`).
+  - Google Drive (`DriveApp`): Mengambil dan mengelola 9 foto slideshow dari folder ID khusus (`SLIDESHOW_FOLDER_ID`: `1R6S-RavuW1z6RO3g_CcBvU2kqbhgAycj`) dengan konversi otomatis ke link thumbnail resolusi ultra tinggi (`sz=w1920`) serta folder berkas umum/ekspor (`FOLDER_ID`: `1roxR2bu5O-Q1O05bjvh9_N69QHXw8NZ_`).
   - Google Docs (`DocumentApp`): Membuat salinan dokumen template Word (`templateId`), melakukan penggantian tag placeholder regex secara cepat, mengonversi ke format `.docx`, dan mengembalikan data dalam bentuk payload Base64 instan ke frontend.
   - Subfolder `Temp_Exports` & Pembersihan Otomatis (Auto-Cleanup): Berkas ekspor sementara yang berusia lebih dari 24 jam otomatis dibersihkan ke tempat sampah (Trash).
 

@@ -1,6 +1,6 @@
 // ID SPREADSHEET DAN FOLDER
 const SHEET_ID = '16abr7-2np5jY5uG6G16fAjDPoFa_4wVUHxVxxsv3PWw';
-const FOLDER_ID = '1OlYaZMxUOQFGmS1L_R9t2p45ZcKr3v9K'; // Folder Ekspor & Arsip
+const FOLDER_ID = '1roxR2bu5O-Q1O05bjvh9_N69QHXw8NZ_'; // Folder Ekspor & Arsip (igdrsudsubang)
 const SLIDESHOW_FOLDER_ID = '1R6S-RavuW1z6RO3g_CcBvU2kqbhgAycj'; // Folder 9 Foto Slideshow Beranda
 const BACKUP_FOLDER_ID = '1Y7HY4BO5NtEdJ7Y8ds68WJwoeffECKqR'; // Folder Backup Database IGD
 function getSessionSecret_() {
@@ -1143,15 +1143,38 @@ function listDatabaseBackups(token) {
 // 5. MANAJEMEN SUBFOLDER & CLEANUP EKSPOR SEMENTARA
 // ==========================================
 function getOrCreateTempExportsFolder() {
-  if (!FOLDER_ID || FOLDER_ID.trim() === '') {
-    throw new Error('FOLDER_ID belum dikonfigurasi di server.');
+  let parentFolder = null;
+  if (FOLDER_ID && FOLDER_ID.trim() !== '') {
+    try {
+      parentFolder = DriveApp.getFolderById(FOLDER_ID);
+    } catch (e) {
+      console.warn('Peringatan: FOLDER_ID tidak dapat diakses (' + FOLDER_ID + '), fallback ke root drive: ' + e.toString());
+    }
   }
-  const parentFolder = DriveApp.getFolderById(FOLDER_ID);
-  const subfolders = parentFolder.getFoldersByName('Temp_Exports');
-  if (subfolders.hasNext()) {
-    return subfolders.next();
+
+  // Jika parentFolder belum diperoleh, fallback ke root folder Drive
+  if (!parentFolder) {
+    try {
+      parentFolder = DriveApp.getRootFolder();
+    } catch (eRoot) {
+      console.warn('Gagal mengakses root folder: ' + eRoot.toString());
+    }
   }
-  return parentFolder.createFolder('Temp_Exports');
+
+  if (parentFolder) {
+    try {
+      const subfolders = parentFolder.getFoldersByName('Temp_Exports');
+      if (subfolders.hasNext()) {
+        return subfolders.next();
+      }
+      return parentFolder.createFolder('Temp_Exports');
+    } catch (subErr) {
+      console.warn('Gagal mengelola subfolder Temp_Exports, gunakan parent folder: ' + subErr.toString());
+      return parentFolder;
+    }
+  }
+
+  return DriveApp.getRootFolder();
 }
 
 function cleanupOldTempExports() {
@@ -1393,10 +1416,32 @@ function generateRetensiDoc(docData, token) {
     const jam = placeholders['JAM'] ? '_' + String(placeholders['JAM']).replace(/[^a-zA-Z0-9]/g, '') : '';
     const newFileName = 'Data_Retensi_' + tgl + jam;
     
-    // Tempatkan salinan dokumen sementara ke dalam subfolder khusus Temp_Exports
-    const targetFolder = getOrCreateTempExportsFolder();
-    const templateFile = DriveApp.getFileById(templateId);
-    newFile = templateFile.makeCopy(newFileName, targetFolder);
+    // Ambil template dokumen dengan penanganan error yang jelas
+    let templateFile = null;
+    try {
+      templateFile = DriveApp.getFileById(templateId);
+    } catch (tplErr) {
+      throw new Error("Template Dokumen Retensi (" + templateId + ") tidak dapat diakses atau belum dibagikan izinnya: " + tplErr.message);
+    }
+
+    // Tempatkan salinan dokumen sementara ke dalam subfolder khusus Temp_Exports atau root
+    let targetFolder = null;
+    try {
+      targetFolder = getOrCreateTempExportsFolder();
+    } catch (fErr) {
+      console.warn("Gagal memperoleh folder ekspor sementara: " + fErr.toString());
+    }
+
+    if (targetFolder) {
+      try {
+        newFile = templateFile.makeCopy(newFileName, targetFolder);
+      } catch (cpErr) {
+        console.warn("makeCopy ke targetFolder gagal, fallback ke root: " + cpErr.toString());
+        newFile = templateFile.makeCopy(newFileName);
+      }
+    } else {
+      newFile = templateFile.makeCopy(newFileName);
+    }
     const docId = newFile.getId();
     
     // Buka dokumen duplikat untuk memanipulasi teks
