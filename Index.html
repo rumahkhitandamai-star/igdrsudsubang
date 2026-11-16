@@ -1498,6 +1498,7 @@
       <div class="modal-footer">
         <div class="loader" id="save-loader"></div>
         <button class="btn-action btn-secondary" onclick="askCloseModal()">Batal</button>
+        <button type="button" class="btn-action" id="btn-modal-word" onclick="exportRetensiWordFromModal()" style="display: none; background: #1976d2; color: #fff;">📄 Simpan Word</button>
         <button class="btn-action" id="btn-save" onclick="askSave()">Simpan Data</button>
       </div>
     </div>
@@ -4983,25 +4984,25 @@
     }
 
     // --- HELPER FORMAT & PEMBERSIHAN SPASI RINCIAN KASUS RETENSI ---
-    function formatCaseListText(val) {
-      if (!val) return '-';
+    function formatCaseListText(val, defaultCategory = '') {
+      if (!val) return defaultCategory ? (defaultCategory + '\n-') : '-';
       const raw = val.toString().trim();
-      if (!raw || raw === '-' || raw.toLowerCase() === 'nihil') return '-';
+      if (!raw || raw === '-' || raw.toLowerCase() === 'nihil') return defaultCategory ? (defaultCategory + '\n-') : '-';
       
       // Bersihkan spasi ganda/tab pada setiap baris dan buang baris kosong yang tidak perlu
       const lines = raw.split(/\r?\n/)
         .map(l => l.replace(/[\t ]+/g, ' ').trim())
         .filter(l => l.length > 0);
         
-      if (lines.length === 0) return '-';
-      if (lines.length === 1 && lines[0] === '-') return '-';
+      if (lines.length === 0) return defaultCategory ? (defaultCategory + '\n-') : '-';
+      if (lines.length === 1 && lines[0] === '-') return defaultCategory ? (defaultCategory + '\n-') : '-';
 
       // Deteksi apakah baris pertama merupakan judul/kategori (ANAK, BEDAH, DALAM, KEBIDANAN)
       const isCategoryHeader = /^(?:\d+[\.\)\-]\s*)?(?:KASUS\s+)?(ANAK|BEDAH|DALAM|NON\s*BEDAH|KEBIDANAN)\b/i.test(lines[0]);
 
       if (isCategoryHeader && lines.length > 1) {
-        // Hilangkan angka penomoran (misal '1.') di baris judul/kategori
-        const headerLine = lines[0].replace(/^\d+[\.\)\-]\s*/, '').trim();
+        // Hilangkan angka penomoran (misal '1.') dan kata kasus di baris judul/kategori
+        const headerLine = lines[0].replace(/^\d+[\.\)\-]\s*/, '').replace(/^kasus\s+/i, '').trim();
         const subLines = lines.slice(1);
         
         // Cek apakah sub-baris memakai bullet
@@ -5025,10 +5026,12 @@
 
       // Jika baris tunggal adalah header kategori, hilangkan angka di depannya
       if (isCategoryHeader && lines.length === 1) {
-        return lines[0].replace(/^\d+[\.\)\-]\s*/, '').trim();
+        const headerLine = lines[0].replace(/^\d+[\.\)\-]\s*/, '').replace(/^kasus\s+/i, '').trim();
+        return headerLine + '\n-';
       }
 
       // Deteksi apakah teks sudah mengandung penomoran atau simbol poin
+      let formattedList;
       let hasNumbering = false;
       let hasBullet = false;
       lines.forEach(l => {
@@ -5038,16 +5041,21 @@
       
       if (hasNumbering) {
         // Standardisasi penomoran urut yang rapi: 1. 2. 3. dst
-        return lines.map((l, i) => l.replace(/^\d+[\.\)\-]\s*/, (i + 1) + '. ')).join('\n');
+        formattedList = lines.map((l, i) => l.replace(/^\d+[\.\)\-]\s*/, (i + 1) + '. ')).join('\n');
       } else if (hasBullet) {
         // Standardisasi simbol poin konsisten: •
-        return lines.map(l => l.replace(/^[\-\*•]\s*/, '• ')).join('\n');
+        formattedList = lines.map(l => l.replace(/^[\-\*•]\s*/, '• ')).join('\n');
       } else if (lines.length > 1) {
         // Otomatisasi format daftar bernomor jika terdiri dari beberapa baris tanpa penomoran
-        return lines.map((l, i) => (i + 1) + '. ' + l).join('\n');
+        formattedList = lines.map((l, i) => (i + 1) + '. ' + l).join('\n');
       } else {
-        return lines[0];
+        formattedList = lines[0];
       }
+
+      if (defaultCategory) {
+        return defaultCategory + '\n' + formattedList;
+      }
+      return formattedList;
     }
 
     // Helper menghitung jumlah kasus pada Retensi (menghasilkan angka saja, bukan teks rincian)
@@ -5085,7 +5093,12 @@
       const originalBtnHTML = btnElement ? btnElement.innerHTML : '';
       if (btnElement) {
         btnElement.classList.add('loading');
-        btnElement.innerHTML = '<span class="spinner-word"></span>';
+        if (btnElement.id === 'btn-modal-word') {
+          btnElement.innerHTML = '<span class="spinner-word" style="border-top-color:#fff; border-color:rgba(255,255,255,0.3); margin-right:6px;"></span> Menyusun Word...';
+          btnElement.disabled = true;
+        } else {
+          btnElement.innerHTML = '<span class="spinner-word"></span>';
+        }
       }
 
       showToast('⏳ Menyiapkan dokumen Word...');
@@ -5104,6 +5117,7 @@
         if (btnElement) {
           btnElement.classList.remove('loading');
           btnElement.innerHTML = originalBtnHTML;
+          btnElement.disabled = false;
         }
         if (loader) {
           loader.style.display = 'none';
@@ -5127,27 +5141,27 @@
           'PERSENTASE': persentase,
           'PERSENTASI': persentase,
           'PERSEN': persentase,
-          'KASUS_ANAK': formatCaseListText(row[5]),
-          'KASUS ANAK': formatCaseListText(row[5]),
-          'ANAK': formatCaseListText(row[5]),
-          'RINCIAN_ANAK': formatCaseListText(row[5]),
-          'RINCIAN_KASUS_ANAK': formatCaseListText(row[5]),
-          'KASUS_BEDAH': formatCaseListText(row[6]),
-          'KASUS BEDAH': formatCaseListText(row[6]),
-          'BEDAH': formatCaseListText(row[6]),
-          'RINCIAN_BEDAH': formatCaseListText(row[6]),
-          'RINCIAN_KASUS_BEDAH': formatCaseListText(row[6]),
-          'KASUS_NON_BEDAH': formatCaseListText(row[7]),
-          'KASUS NON BEDAH': formatCaseListText(row[7]),
-          'NON_BEDAH': formatCaseListText(row[7]),
-          'NON BEDAH': formatCaseListText(row[7]),
-          'RINCIAN_NON_BEDAH': formatCaseListText(row[7]),
-          'RINCIAN_KASUS_NON_BEDAH': formatCaseListText(row[7]),
-          'KASUS_KEBIDANAN': formatCaseListText(row[8]),
-          'KASUS KEBIDANAN': formatCaseListText(row[8]),
-          'KEBIDANAN': formatCaseListText(row[8]),
-          'RINCIAN_KEBIDANAN': formatCaseListText(row[8]),
-          'RINCIAN_KASUS_KEBIDANAN': formatCaseListText(row[8]),
+          'KASUS_ANAK': formatCaseListText(row[5], 'ANAK'),
+          'KASUS ANAK': formatCaseListText(row[5], 'ANAK'),
+          'ANAK': formatCaseListText(row[5], 'ANAK'),
+          'RINCIAN_ANAK': formatCaseListText(row[5], 'ANAK'),
+          'RINCIAN_KASUS_ANAK': formatCaseListText(row[5], 'ANAK'),
+          'KASUS_BEDAH': formatCaseListText(row[6], 'BEDAH'),
+          'KASUS BEDAH': formatCaseListText(row[6], 'BEDAH'),
+          'BEDAH': formatCaseListText(row[6], 'BEDAH'),
+          'RINCIAN_BEDAH': formatCaseListText(row[6], 'BEDAH'),
+          'RINCIAN_KASUS_BEDAH': formatCaseListText(row[6], 'BEDAH'),
+          'KASUS_NON_BEDAH': formatCaseListText(row[7], 'NON BEDAH'),
+          'KASUS NON BEDAH': formatCaseListText(row[7], 'NON BEDAH'),
+          'NON_BEDAH': formatCaseListText(row[7], 'NON BEDAH'),
+          'NON BEDAH': formatCaseListText(row[7], 'NON BEDAH'),
+          'RINCIAN_NON_BEDAH': formatCaseListText(row[7], 'NON BEDAH'),
+          'RINCIAN_KASUS_NON_BEDAH': formatCaseListText(row[7], 'NON BEDAH'),
+          'KASUS_KEBIDANAN': formatCaseListText(row[8], 'KEBIDANAN'),
+          'KASUS KEBIDANAN': formatCaseListText(row[8], 'KEBIDANAN'),
+          'KEBIDANAN': formatCaseListText(row[8], 'KEBIDANAN'),
+          'RINCIAN_KEBIDANAN': formatCaseListText(row[8], 'KEBIDANAN'),
+          'RINCIAN_KASUS_KEBIDANAN': formatCaseListText(row[8], 'KEBIDANAN'),
           'JUMLAH_ANAK': countCaseEntries(row[5]),
           'JUMLAH ANAK': countCaseEntries(row[5]),
           'TOTAL_ANAK': countCaseEntries(row[5]),
@@ -5212,6 +5226,41 @@
           showToast('Gagal memproses Word: ' + (err.message || err));
         })
         .generateRetensiDoc(JSON.stringify(docData), getStoredToken());
+    }
+
+    // --- FUNGSI EXPORT WORD RETENSI DARI MODAL FORM ---
+    function exportRetensiWordFromModal() {
+      if (currentMenu !== 'Retensi') return;
+      const sch = APP_SCHEMA['Retensi'];
+      if (!sch) return;
+
+      const row = [];
+      sch.forEach((col, idx) => {
+        const inp = document.getElementById('inp_' + idx);
+        let val = inp ? inp.value : '';
+        if (col.t === 'number') {
+          val = (val !== '' && !isNaN(Number(val))) ? Math.max(0, Math.floor(Number(val))) : 0;
+        }
+        row.push(val);
+      });
+
+      const tgl = row[2];
+      const jam = row[3];
+      if (!tgl) {
+        showToast('⚠️ Tanggal Retensi wajib diisi sebelum menyimpan Word.');
+        const dateInp = document.getElementById('inp_2');
+        if (dateInp) dateInp.focus();
+        return;
+      }
+      if (!jam) {
+        showToast('⚠️ Jam Retensi (07:00 WIB / 19:00 WIB) wajib dipilih sebelum menyimpan Word.');
+        const jamInp = document.getElementById('inp_3');
+        if (jamInp) jamInp.focus();
+        return;
+      }
+
+      const btnModalWord = document.getElementById('btn-modal-word');
+      exportRetensiWord(row, btnModalWord);
     }
 
     // --- FUNGSI EXPORT EXCEL ---
@@ -5818,6 +5867,14 @@
       const saveLoader = document.getElementById('save-loader');
       if (saveLoader) saveLoader.style.display = 'none';
 
+      // Tombol Simpan Word khusus form modal Retensi
+      const btnModalWord = document.getElementById('btn-modal-word');
+      if (btnModalWord) {
+        btnModalWord.style.display = (currentMenu === 'Retensi') ? 'inline-block' : 'none';
+        btnModalWord.disabled = false;
+        btnModalWord.innerHTML = '📄 Simpan Word';
+      }
+
       document.getElementById('modal-title').innerText = "Tambah Data " + currentMenu; 
       buildForm(); 
       rememberFocus();
@@ -5854,6 +5911,14 @@
       const saveLoader = document.getElementById('save-loader');
       if (saveLoader) saveLoader.style.display = 'none';
 
+      // Tombol Simpan Word khusus form modal Retensi
+      const btnModalWord = document.getElementById('btn-modal-word');
+      if (btnModalWord) {
+        btnModalWord.style.display = (currentMenu === 'Retensi') ? 'inline-block' : 'none';
+        btnModalWord.disabled = false;
+        btnModalWord.innerHTML = '📄 Simpan Word';
+      }
+
       document.getElementById('modal-title').innerText = "Edit Data " + currentMenu; 
       buildForm(rowObj); 
       rememberFocus();
@@ -5863,6 +5928,8 @@
 
     function closeModal() { 
       document.getElementById('form-modal').style.display = 'none'; 
+      const btnModalWord = document.getElementById('btn-modal-word');
+      if (btnModalWord) btnModalWord.style.display = 'none';
       restoreFocus();
     }
 

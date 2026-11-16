@@ -7,8 +7,8 @@
     "push": "clasp push -f",
     "deploy": "clasp deploy -i AKfycbzdzfwzNOWKJEH1pCwqJyhfK3IaBCrKua0awE-GWOIGHZdXynQmMPc70Q2OoKlFfZIR -d \"Auto Deploy\"",
     "deploy:firebase": "firebase deploy --only hosting",
-    "sync:drive": "rclone copy . \"gdrive:Aplikasi Web/igd_rsudsubang\" --include \"AGENTS.md\" --include \"prd.md\"",
-    "sync": "rclone copy . \"gdrive:Aplikasi Web/igd_rsudsubang\" --include \"AGENTS.md\" --include \"prd.md\" && clasp push -f && clasp deploy -i AKfycbzdzfwzNOWKJEH1pCwqJyhfK3IaBCrKua0awE-GWOIGHZdXynQmMPc70Q2OoKlFfZIR -d \"Auto Deploy\""
+    "sync:drive": "rclone copy . \"gdrive:Aplikasi Web/igdrsudsubang\" --include \"AGENTS.md\" --include \"prd.md\"",
+    "sync": "rclone copy . \"gdrive:Aplikasi Web/igdrsudsubang\" --include \"AGENTS.md\" --include \"prd.md\" && clasp push -f && clasp deploy -i AKfycbzdzfwzNOWKJEH1pCwqJyhfK3IaBCrKua0awE-GWOIGHZdXynQmMPc70Q2OoKlFfZIR -d \"Auto Deploy\""
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",

@@ -1181,6 +1181,198 @@ function cleanupOldTempExports() {
 // ==========================================
 // 6. EXPORT WORD (KHUSUS RETENSI)
 // ==========================================
+/**
+ * Helper penggantian placeholder multiline pada kontainer dokumen (Body/Header/Footer).
+ * Mengatasi batasan DocumentApp.replaceText yang tidak mengizinkan karakter newline (\n).
+ */
+function replacePlaceholderInContainer_(container, pattern, rawVal) {
+  if (!container) return;
+  const rawStr = String(rawVal !== undefined && rawVal !== null ? rawVal : '');
+
+  // Jika teks baris tunggal (tanpa newline), gunakan replaceText bawaan GAS yang sangat cepat
+  if (rawStr.indexOf('\n') === -1) {
+    const safeVal = rawStr.replace(/\\/g, '\\\\').replace(/\$/g, '\\$');
+    try {
+      container.replaceText(pattern, safeVal);
+    } catch (e) {
+      console.warn('replaceText gagal: ' + e.toString());
+    }
+    return;
+  }
+
+  // Jika teks mengandung multi baris (\n):
+  const lines = rawStr.split(/\r?\n/);
+  let found = container.findText(pattern);
+  let maxLoop = 50; // Guard terhadap perulangan tak terbatas
+  while (found && maxLoop-- > 0) {
+    const textElement = found.getElement().asText();
+    const startOffset = found.getStartOffset();
+    const endOffset = found.getEndOffsetInclusive();
+    const parent = textElement.getParent();
+
+    if (parent && parent.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      const para = parent.asParagraph();
+      const parentContainer = para.getParent();
+      const childIdx = parentContainer.getChildIndex(para);
+
+      const fullText = para.getText();
+      const prefix = fullText.substring(0, startOffset);
+      const suffix = fullText.substring(endOffset + 1);
+
+      let firstLine = lines[0];
+      // Jika prefix diakhiri kata 'KASUS' dan firstLine diawali 'KASUS', hapus dari firstLine agar tidak ganda
+      if (/kasus\s*$/i.test(prefix.trim()) && /^kasus\s+/i.test(firstLine.trim())) {
+        firstLine = firstLine.trim().replace(/^kasus\s+/i, '');
+      }
+
+      para.setText(prefix + firstLine);
+
+      // Sisipkan baris-baris rincian berikutnya di bawahnya
+      for (let i = 1; i < lines.length; i++) {
+        let lineText = lines[i];
+        if (i === lines.length - 1 && suffix) {
+          lineText += suffix;
+        }
+
+        let newPara = null;
+        if (parentContainer.getType() === DocumentApp.ElementType.BODY_SECTION) {
+          newPara = parentContainer.asBody().insertParagraph(childIdx + i, lineText);
+        } else if (parentContainer.getType() === DocumentApp.ElementType.TABLE_CELL) {
+          newPara = parentContainer.asTableCell().insertParagraph(childIdx + i, lineText);
+        } else if (parentContainer.getType() === DocumentApp.ElementType.HEADER_SECTION) {
+          newPara = parentContainer.asHeaderSection().insertParagraph(childIdx + i, lineText);
+        } else if (parentContainer.getType() === DocumentApp.ElementType.FOOTER_SECTION) {
+          newPara = parentContainer.asFooterSection().insertParagraph(childIdx + i, lineText);
+        } else {
+          newPara = container.insertParagraph(childIdx + i, lineText);
+        }
+
+        if (newPara) {
+          try {
+            newPara.setAttributes(para.getAttributes());
+          } catch (attrErr) {}
+        }
+      }
+    } else {
+      try {
+        textElement.deleteText(startOffset, endOffset);
+        textElement.insertText(startOffset, lines.join(', '));
+      } catch (err) {}
+    }
+
+    found = container.findText(pattern, found);
+  }
+}
+
+/**
+ * Multi-strategy export docx binary dari Google Doc.
+ * Menangani redirect 307 secara otomatis tanpa mengirim Authorization header ke googleusercontent.
+ */
+function exportDocToDocxBase64_(docId) {
+  let base64Data = null;
+  const oauthToken = ScriptApp.getOAuthToken();
+
+  // Strategi 1: Drive API v3 export endpoint (Paling stabil, streaming binary langsung)
+  try {
+    const driveV3Url = "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(docId) + "/export?mimeType=application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    const res1 = UrlFetchApp.fetch(driveV3Url, {
+      headers: { Authorization: 'Bearer ' + oauthToken },
+      muteHttpExceptions: true
+    });
+    if (res1.getResponseCode() === 200) {
+      const bytes = res1.getBlob().getBytes();
+      if (bytes && bytes.length > 50) {
+        return Utilities.base64Encode(bytes);
+      }
+    } else {
+      console.warn("Strategi 1 (Drive v3) mengembalikan status: " + res1.getResponseCode());
+    }
+  } catch (err1) {
+    console.warn("Strategi 1 (Drive v3) error: " + err1.toString());
+  }
+
+  // Strategi 2: Google Docs export endpoint (/export?format=docx) dengan penanganan redirect 307
+  try {
+    const docsExportUrl = "https://docs.google.com/document/d/" + encodeURIComponent(docId) + "/export?format=docx";
+    const res2 = UrlFetchApp.fetch(docsExportUrl, {
+      headers: { Authorization: 'Bearer ' + oauthToken },
+      followRedirects: false,
+      muteHttpExceptions: true
+    });
+    const code2 = res2.getResponseCode();
+    if (code2 === 200) {
+      const bytes = res2.getBlob().getBytes();
+      if (bytes && bytes.length > 50) {
+        return Utilities.base64Encode(bytes);
+      }
+    } else if (code2 === 307 || code2 === 302 || code2 === 301) {
+      const headers = res2.getAllHeaders();
+      const redirectLoc = headers['Location'] || headers['location'];
+      if (redirectLoc) {
+        // PENTING: Jangan sertakan Authorization header pada URL googleusercontent pre-signed
+        const resRedirect = UrlFetchApp.fetch(redirectLoc, {
+          muteHttpExceptions: true
+        });
+        if (resRedirect.getResponseCode() === 200) {
+          const bytes = resRedirect.getBlob().getBytes();
+          if (bytes && bytes.length > 50) {
+            return Utilities.base64Encode(bytes);
+          }
+        }
+      }
+    }
+  } catch (err2) {
+    console.warn("Strategi 2 (Docs Export) error: " + err2.toString());
+  }
+
+  // Strategi 3: Feeds download endpoint dengan penanganan redirect 307
+  try {
+    const feedsUrl = "https://docs.google.com/feeds/download/documents/export/Export?id=" + encodeURIComponent(docId) + "&exportFormat=docx";
+    const res3 = UrlFetchApp.fetch(feedsUrl, {
+      headers: { Authorization: 'Bearer ' + oauthToken },
+      followRedirects: false,
+      muteHttpExceptions: true
+    });
+    const code3 = res3.getResponseCode();
+    if (code3 === 200) {
+      const bytes = res3.getBlob().getBytes();
+      if (bytes && bytes.length > 50) {
+        return Utilities.base64Encode(bytes);
+      }
+    } else if (code3 === 307 || code3 === 302 || code3 === 301) {
+      const headers = res3.getAllHeaders();
+      const redirectLoc = headers['Location'] || headers['location'];
+      if (redirectLoc) {
+        const resRedirect = UrlFetchApp.fetch(redirectLoc, {
+          muteHttpExceptions: true
+        });
+        if (resRedirect.getResponseCode() === 200) {
+          const bytes = resRedirect.getBlob().getBytes();
+          if (bytes && bytes.length > 50) {
+            return Utilities.base64Encode(bytes);
+          }
+        }
+      }
+    }
+  } catch (err3) {
+    console.warn("Strategi 3 (Feeds) error: " + err3.toString());
+  }
+
+  // Strategi 4: Menggunakan getAs jika didukung lingkungan runtime
+  try {
+    const file = DriveApp.getFileById(docId);
+    const blob = file.getAs('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    if (blob) {
+      const bytes = blob.getBytes();
+      if (bytes && bytes.length > 50) {
+        return Utilities.base64Encode(bytes);
+      }
+    }
+  } catch (err4) {}
+
+  return null;
+}
+
 function generateRetensiDoc(docData, token) {
   let newFile = null;
   try {
@@ -1230,39 +1422,21 @@ function generateRetensiDoc(docData, token) {
       if (!inBody && !inHeader && !inFooter) continue;
 
       const rawVal = placeholders[key] !== undefined && placeholders[key] !== null ? String(placeholders[key]) : '';
-      const safeVal = rawVal.replace(/\\/g, '\\\\').replace(/\$/g, '\\$');
       const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       
       // Pola regex gabungan toleran spasi dan format kurung (<<KEY>> atau {{KEY}}) dalam satu panggilan
       const combinedPattern = '(?i)(<<|\\{\\{)\\s*' + escapedKey + '\\s*(>>|\\}\\})';
       
-      if (inBody) { try { body.replaceText(combinedPattern, safeVal); } catch(e){} }
-      if (inHeader) { try { header.replaceText(combinedPattern, safeVal); } catch(e){} }
-      if (inFooter) { try { footer.replaceText(combinedPattern, safeVal); } catch(e){} }
+      if (inBody) replacePlaceholderInContainer_(body, combinedPattern, rawVal);
+      if (inHeader) replacePlaceholderInContainer_(header, combinedPattern, rawVal);
+      if (inFooter) replacePlaceholderInContainer_(footer, combinedPattern, rawVal);
     }
     
     // Wajib simpan dan tutup agar perubahan teks tersinkronisasi
     doc.saveAndClose();
     
-    let base64Data = null;
-
-    // Ambil data binary docx secara cepat menggunakan feed export langsung
-    try {
-      const token = ScriptApp.getOAuthToken();
-      const fastExportUrl = "https://docs.google.com/feeds/download/documents/export/Export?id=" + docId + "&exportFormat=docx";
-      const res = UrlFetchApp.fetch(fastExportUrl, {
-        headers: { Authorization: 'Bearer ' + token },
-        muteHttpExceptions: true
-      });
-      if (res.getResponseCode() === 200) {
-        const bytes = res.getBlob().getBytes();
-        if (bytes && bytes.length > 50) {
-          base64Data = Utilities.base64Encode(bytes);
-        }
-      }
-    } catch (fetchErr) {
-      console.warn("Peringatan pengambilan blob docx: " + fetchErr.toString());
-    }
+    // Ambil binary DOCX menggunakan multi-strategy export yang handal
+    const base64Data = exportDocToDocxBase64_(docId);
     
     // CEGAH SIMPAN DI GDRIVE: Segera hapus berkas salinan sementara dari Google Drive
     // Berkas Word HANYA disimpan ke perangkat pengguna via stream base64/Blob di browser
