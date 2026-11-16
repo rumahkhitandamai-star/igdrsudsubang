@@ -1142,7 +1142,26 @@ function listDatabaseBackups(token) {
 // ==========================================
 // 5. MANAJEMEN SUBFOLDER & CLEANUP EKSPOR SEMENTARA
 // ==========================================
-function getOrCreateTempExportsFolder() {
+function getOrCreateTempExportsFolder(forceRefresh) {
+  const cacheKey = 'IGD_TEMP_EXPORTS_FOLDER_ID';
+  let cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) {}
+
+  // Jalur cepat: gunakan folder ID yang sudah di-cache (hindari lookup Drive berulang)
+  if (!forceRefresh && cache) {
+    try {
+      const cachedId = cache.get(cacheKey);
+      if (cachedId) {
+        const cachedFolder = DriveApp.getFolderById(cachedId);
+        if (cachedFolder && cachedFolder.getName() === 'Temp_Exports' && !cachedFolder.isTrashed()) {
+          return cachedFolder;
+        }
+      }
+    } catch (cacheErr) {
+      try { cache.remove(cacheKey); } catch (e) {}
+    }
+  }
+
   let parentFolder = null;
   if (FOLDER_ID && FOLDER_ID.trim() !== '') {
     try {
@@ -1161,28 +1180,52 @@ function getOrCreateTempExportsFolder() {
     }
   }
 
+  let resolved = null;
   if (parentFolder) {
     try {
       const subfolders = parentFolder.getFoldersByName('Temp_Exports');
       if (subfolders.hasNext()) {
-        return subfolders.next();
+        resolved = subfolders.next();
+      } else {
+        resolved = parentFolder.createFolder('Temp_Exports');
       }
-      return parentFolder.createFolder('Temp_Exports');
     } catch (subErr) {
       console.warn('Gagal mengelola subfolder Temp_Exports, gunakan parent folder: ' + subErr.toString());
-      return parentFolder;
+      resolved = parentFolder;
     }
   }
 
-  return DriveApp.getRootFolder();
+  if (!resolved) resolved = DriveApp.getRootFolder();
+
+  // Simpan ID folder Temp_Exports agar ekspor berikutnya tidak perlu lookup berulang
+  if (cache && resolved) {
+    try {
+      if (resolved.getName() === 'Temp_Exports') {
+        cache.put(cacheKey, resolved.getId(), 21600); // 6 jam
+      }
+    } catch (e) {}
+  }
+
+  return resolved;
 }
 
-function cleanupOldTempExports() {
+function cleanupOldTempExports(tempFolderOpt) {
   try {
-    const tempFolder = getOrCreateTempExportsFolder();
+    // Throttle: pembersihan file lama (>24 jam) cukup berkala agar tidak memperlambat ekspor
+    let cache = null;
+    try { cache = CacheService.getScriptCache(); } catch (e) {}
+    const throttleKey = 'IGD_TEMP_EXPORTS_LAST_CLEANUP';
+    if (cache) {
+      try {
+        if (cache.get(throttleKey)) return; // sudah dibersihkan baru-baru ini
+      } catch (e) {}
+    }
+
+    const tempFolder = tempFolderOpt || getOrCreateTempExportsFolder();
     // Pengamanan ketat: jangan pernah menyapu folder Root Drive
     if (tempFolder.getId() === DriveApp.getRootFolder().getId() || tempFolder.getName() !== 'Temp_Exports') {
       console.warn('Pembersihan dibatalkan: folder tujuan bukan Temp_Exports.');
+      if (cache) { try { cache.put(throttleKey, '1', 21600); } catch (e) {} }
       return;
     }
     const files = tempFolder.getFiles();
@@ -1196,6 +1239,9 @@ function cleanupOldTempExports() {
         file.setTrashed(true);
       }
     }
+
+    // Tandai sudah dibersihkan (6 jam) agar permintaan ekspor berikutnya tidak terhambat
+    if (cache) { try { cache.put(throttleKey, String(Date.now()), 21600); } catch (e) {} }
   } catch (err) {
     console.warn('Peringatan cleanup berkas sementara: ' + err.toString());
   }
@@ -1402,9 +1448,6 @@ function generateRetensiDoc(docData, token) {
     const session = verifySessionToken_(token);
     assertUserCanAccess_(session, 'RETENSI', 'export');
 
-    // Bersihkan berkas sementara terdahulu di Google Drive
-    cleanupOldTempExports();
-
     // Validasi parameter aman
     if (!docData) throw new Error("Data permintaan kosong.");
     if (typeof docData === 'string') docData = JSON.parse(docData);
@@ -1424,12 +1467,18 @@ function generateRetensiDoc(docData, token) {
       throw new Error("Template Dokumen Retensi (" + templateId + ") tidak dapat diakses atau belum dibagikan izinnya: " + tplErr.message);
     }
 
-    // Tempatkan salinan dokumen sementara ke dalam subfolder khusus Temp_Exports atau root
+    // Resolve folder sementara sekali (di-cache) lalu bersihkan file lama secara berkala (throttled)
+    // agar permintaan ekspor tidak menanggung biaya scan Drive setiap kali.
     let targetFolder = null;
     try {
       targetFolder = getOrCreateTempExportsFolder();
     } catch (fErr) {
       console.warn("Gagal memperoleh folder ekspor sementara: " + fErr.toString());
+    }
+    try {
+      cleanupOldTempExports(targetFolder);
+    } catch (cleanupErr) {
+      console.warn('Pembersihan berkas sementara dilewati: ' + cleanupErr.toString());
     }
 
     if (targetFolder) {
