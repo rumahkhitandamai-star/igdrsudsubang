@@ -1757,6 +1757,128 @@
           return s;
         }
 
+        // --- HELPER (append-only): membangun DOCX valid (ZIP OOXML) untuk mode pratinjau lokal ---
+        // Sebelumnya mock menghasilkan teks polos berekstensi .docx sehingga tidak bisa dibuka Word.
+        function buildMockDocxBase64_(text) {
+          const utf8Bytes = (str) => {
+            const out = [];
+            const enc = encodeURIComponent(String(str));
+            for (let i = 0; i < enc.length; i++) {
+              if (enc.charAt(i) === '%') {
+                out.push(parseInt(enc.substr(i + 1, 2), 16));
+                i += 2;
+              } else {
+                out.push(enc.charCodeAt(i));
+              }
+            }
+            return out;
+          };
+          const escXml = (s) => String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;');
+
+          const lines = String(text == null ? '' : text).split('\n');
+          let paras = '';
+          for (let i = 0; i < lines.length; i++) {
+            paras += '<w:p><w:r><w:t xml:space="preserve">' + escXml(lines[i]) + '</w:t></w:r></w:p>';
+          }
+
+          const files = [
+            {
+              name: '[Content_Types].xml',
+              data: '<' + '?xml version="1.0" encoding="UTF-8" standalone="yes"' + '?' + '>' +
+                '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+                '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+                '<Default Extension="xml" ContentType="application/xml"/>' +
+                '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+                '</Types>'
+            },
+            {
+              name: '_rels/.rels',
+              data: '<' + '?xml version="1.0" encoding="UTF-8" standalone="yes"' + '?' + '>' +
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+                '</Relationships>'
+            },
+            {
+              name: 'word/document.xml',
+              data: '<' + '?xml version="1.0" encoding="UTF-8" standalone="yes"' + '?' + '>' +
+                '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+                '<w:body>' + paras + '</w:body></w:document>'
+            }
+          ];
+
+          const crcTable = (function() {
+            const t = new Uint32Array(256);
+            for (let n = 0; n < 256; n++) {
+              let c = n;
+              for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+              t[n] = c >>> 0;
+            }
+            return t;
+          })();
+          const crc32 = (bytes) => {
+            let c = 0xFFFFFFFF;
+            for (let i = 0; i < bytes.length; i++) c = crcTable[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+            return (c ^ 0xFFFFFFFF) >>> 0;
+          };
+
+          const u16 = (n) => [n & 255, (n >>> 8) & 255];
+          const u32 = (n) => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
+
+          const localParts = [];
+          const centralParts = [];
+          let offset = 0;
+
+          for (let i = 0; i < files.length; i++) {
+            const nameBytes = utf8Bytes(files[i].name);
+            const dataBytes = utf8Bytes(files[i].data);
+            const crc = crc32(dataBytes);
+
+            const localHeader = [].concat(
+              u32(0x04034b50), u16(20), u16(0x0800), u16(0),
+              u16(0), u16(0),
+              u32(crc), u32(dataBytes.length), u32(dataBytes.length),
+              u16(nameBytes.length), u16(0)
+            );
+            localParts.push(Uint8Array.from(localHeader.concat(nameBytes, dataBytes)));
+
+            const centralHeader = [].concat(
+              u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0),
+              u16(0), u16(0),
+              u32(crc), u32(dataBytes.length), u32(dataBytes.length),
+              u16(nameBytes.length), u16(0), u16(0),
+              u16(0), u16(0), u32(0), u32(offset)
+            );
+            centralParts.push(Uint8Array.from(centralHeader.concat(nameBytes)));
+
+            offset += localHeader.length + nameBytes.length + dataBytes.length;
+          }
+
+          const centralSize = centralParts.reduce((a, b) => a + b.length, 0);
+          const eocd = Uint8Array.from([].concat(
+            u32(0x06054b50), u16(0), u16(0),
+            u16(files.length), u16(files.length),
+            u32(centralSize), u32(offset), u16(0)
+          ));
+
+          const chunks = localParts.concat(centralParts, [eocd]);
+          const total = chunks.reduce((a, b) => a + b.length, 0);
+          const out = new Uint8Array(total);
+          let pos = 0;
+          for (let i = 0; i < chunks.length; i++) {
+            out.set(chunks[i], pos);
+            pos += chunks[i].length;
+          }
+
+          let bin = '';
+          for (let i = 0; i < out.length; i++) bin += String.fromCharCode(out[i]);
+          return btoa(bin);
+        }
+
         class MockGoogleScriptRunner {
           constructor() {
             this._success = null;
@@ -2275,7 +2397,7 @@
               const filename = 'Data_Retensi_' + tgl + jam + '.docx';
               
               const textContent = `LAPORAN RETENSI IGD RSUD SUBANG (SIMULASI PRATINJAU LOKAL)\nTanggal: ${placeholders['TANGGAL'] || '-'}\nJam: ${placeholders['JAM'] || '-'}\nTotal Pasien: ${placeholders['TOTAL_PASIEN'] || '0'}\nPersentase: ${placeholders['PERSENTASE'] || '0%'}\n\n[Kasus Anak]\n${placeholders['KASUS_ANAK'] || '-'}\n\n[Kasus Bedah]\n${placeholders['KASUS_BEDAH'] || '-'}\n\n[Kasus Non Bedah]\n${placeholders['KASUS_NON_BEDAH'] || '-'}\n\n[Kasus Kebidanan]\n${placeholders['KASUS_KEBIDANAN'] || '-'}`;
-              const base64Sample = btoa(unescape(encodeURIComponent(textContent)));
+              const base64Sample = buildMockDocxBase64_(textContent);
 
               this._dispatch({
                 success: true,
@@ -5086,33 +5208,31 @@
 
     // --- FUNGSI EXPORT WORD RETENSI ---
     function exportRetensiWord(row, btnElement = null) {
-      if (window.isExportingWord) return;
+      // Klik saat proses masih berjalan: beri kabar, jangan diabaikan diam-diam
+      if (window.isExportingWord) {
+        showToast('⏳ Dokumen Word masih sedang disusun, mohon tunggu sebentar...');
+        return;
+      }
+
+      // Pastikan sesi aktif sebelum memanggil backend agar error tidak membingungkan
+      if (!getStoredToken()) {
+        showToast('⚠️ Sesi Anda tidak aktif. Silakan keluar (Logout) lalu masuk kembali untuk menyimpan Word.');
+        return;
+      }
+
       window.isExportingWord = true;
 
       // Respon visual instan langsung pada tombol yang diklik
       const originalBtnHTML = btnElement ? btnElement.innerHTML : '';
-      if (btnElement) {
-        btnElement.classList.add('loading');
-        if (btnElement.id === 'btn-modal-word') {
-          btnElement.innerHTML = '<span class="spinner-word" style="border-top-color:#fff; border-color:rgba(255,255,255,0.3); margin-right:6px;"></span> Menyusun Word...';
-          btnElement.disabled = true;
-        } else {
-          btnElement.innerHTML = '<span class="spinner-word"></span>';
-        }
-      }
-
-      showToast('⏳ Menyiapkan dokumen Word...');
-
       const loader = document.getElementById('table-loader');
-      let originalLoaderHTML = '';
-      if (loader) {
-        originalLoaderHTML = loader.innerHTML;
-        loader.innerHTML = '<div class="loader" style="display: inline-block;"></div> Menyusun Dokumen Word...';
-        loader.style.display = 'block';
-      }
+      const originalLoaderHTML = loader ? loader.innerHTML : '';
+      let exportTimeout = null;
+      let resetDone = false;
 
       const resetExportState = () => {
-        if (typeof exportTimeout !== 'undefined') clearTimeout(exportTimeout);
+        if (resetDone) return; // idempoten: aman dipanggil dari timeout, handler, maupun catch
+        resetDone = true;
+        if (exportTimeout) clearTimeout(exportTimeout);
         window.isExportingWord = false;
         if (btnElement) {
           btnElement.classList.remove('loading');
@@ -5124,7 +5244,27 @@
           loader.innerHTML = originalLoaderHTML;
         }
       };
-      const exportTimeout = setTimeout(resetExportState, 45000);
+
+      try {
+        if (btnElement) {
+          btnElement.classList.add('loading');
+          if (btnElement.id === 'btn-modal-word') {
+            btnElement.innerHTML = '<span class="spinner-word" style="border-top-color:#fff; border-color:rgba(255,255,255,0.3); margin-right:6px;"></span> Menyusun Word...';
+            btnElement.disabled = true;
+          } else {
+            btnElement.innerHTML = '<span class="spinner-word"></span>';
+          }
+        }
+
+        showToast('⏳ Menyiapkan dokumen Word...');
+
+        if (loader) {
+          loader.innerHTML = '<div class="loader" style="display: inline-block;"></div> Menyusun Dokumen Word...';
+          loader.style.display = 'block';
+        }
+
+        // Pengaman waktu: kunci selalu dilepas walau respons server tidak pernah tiba
+        exportTimeout = setTimeout(resetExportState, 60000);
       
       const totalPasien = parseFloat(row[4]) || 0;
       const kapasitasTT = (typeof KAPASITAS_TT_RETENSI !== 'undefined' && KAPASITAS_TT_RETENSI > 0) ? KAPASITAS_TT_RETENSI : 40;
@@ -5226,13 +5366,24 @@
           showToast('Gagal memproses Word: ' + (err.message || err));
         })
         .generateRetensiDoc(JSON.stringify(docData), getStoredToken());
+      } catch (syncErr) {
+        // Kegagalan sinkron (sebelum RPC terkirim) tidak boleh mengunci tombol selamanya
+        resetExportState();
+        showToast('Gagal memproses Word: ' + (syncErr && syncErr.message ? syncErr.message : String(syncErr)));
+      }
     }
 
     // --- FUNGSI EXPORT WORD RETENSI DARI MODAL FORM ---
     function exportRetensiWordFromModal() {
-      if (currentMenu !== 'Retensi') return;
+      if (currentMenu !== 'Retensi') {
+        showToast('⚠️ Tombol Simpan Word hanya tersedia pada menu Retensi.');
+        return;
+      }
       const sch = APP_SCHEMA['Retensi'];
-      if (!sch) return;
+      if (!sch) {
+        showToast('⚠️ Skema form Retensi belum termuat. Muat ulang halaman lalu coba lagi.');
+        return;
+      }
 
       const row = [];
       sch.forEach((col, idx) => {
