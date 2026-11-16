@@ -1505,25 +1505,67 @@ function generateRetensiDoc(docData, token) {
     const headerText = header ? header.getText() : '';
     const footerText = footer ? footer.getText() : '';
     
-    // Loop penggantian Placeholder efisien: hanya eksekusi jika placeholder benar-benar ada di dokumen
+    // Bangun lookup nilai dari placeholder client (normalisasi kunci agar alias/spasi/case cocok)
+    const placeholderLookup = {};
+    const normPHKey = function(k) {
+      return String(k || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    };
     for (const key in placeholders) {
-      const keyLower = key.toLowerCase();
-      const inBody = bodyText && bodyText.toLowerCase().indexOf(keyLower) !== -1;
-      const inHeader = header && headerText.toLowerCase().indexOf(keyLower) !== -1;
-      const inFooter = footer && footerText.toLowerCase().indexOf(keyLower) !== -1;
+      if (!Object.prototype.hasOwnProperty.call(placeholders, key)) continue;
+      const nk = normPHKey(key);
+      if (!nk) continue;
+      // Simpan nilai pertama yang valid; alias lain dengan nilai sama tidak masalah
+      if (placeholderLookup[nk] === undefined) {
+        placeholderLookup[nk] = placeholders[key] !== undefined && placeholders[key] !== null ? String(placeholders[key]) : '';
+      }
+    }
 
-      // Lewati panggilan replaceText jika penanda sama sekali tidak ditemukan di dokumen template
-      if (!inBody && !inHeader && !inFooter) continue;
+    // Kumpulkan token placeholder yang BENAR-BENAR ada di dokumen, lalu ganti sekali per token unik
+    // (menghindari iterasi puluhan alias key client yang tidak dipakai template)
+    const collectTokens = function(text) {
+      const map = {};
+      if (!text) return map;
+      const re = /(?:<<|{{)\s*([\s\S]*?)\s*(?:>>|}})/g;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        const inner = m[1];
+        const nk = normPHKey(inner);
+        if (nk && map[nk] === undefined) map[nk] = inner; // simpan bentuk asli untuk pola replace
+      }
+      return map;
+    };
 
-      const rawVal = placeholders[key] !== undefined && placeholders[key] !== null ? String(placeholders[key]) : '';
-      const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      
-      // Pola regex gabungan toleran spasi dan format kurung (<<KEY>> atau {{KEY}}) dalam satu panggilan
+    const tokens = {};
+    const mergeTokens = function(src) {
+      for (const nk in src) {
+        if (Object.prototype.hasOwnProperty.call(src, nk) && tokens[nk] === undefined) tokens[nk] = src[nk];
+      }
+    };
+    mergeTokens(collectTokens(bodyText));
+    mergeTokens(collectTokens(headerText));
+    mergeTokens(collectTokens(footerText));
+
+    const bodyTextNorm = bodyText ? normPHKey(bodyText) : '';
+    const headerTextNorm = headerText ? normPHKey(headerText) : '';
+    const footerTextNorm = footerText ? normPHKey(footerText) : '';
+
+    for (const nk in tokens) {
+      if (!Object.prototype.hasOwnProperty.call(tokens, nk)) continue;
+      if (placeholderLookup[nk] === undefined) continue; // tidak ada nilai dari client
+      const inner = tokens[nk];
+      const rawVal = placeholderLookup[nk];
+      const escapedKey = inner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const combinedPattern = '(?i)(<<|\\{\\{)\\s*' + escapedKey + '\\s*(>>|\\}\\})';
-      
-      if (inBody) replacePlaceholderInContainer_(body, combinedPattern, rawVal);
-      if (inHeader) replacePlaceholderInContainer_(header, combinedPattern, rawVal);
-      if (inFooter) replacePlaceholderInContainer_(footer, combinedPattern, rawVal);
+
+      if (body && bodyTextNorm.indexOf(nk) !== -1) {
+        replacePlaceholderInContainer_(body, combinedPattern, rawVal);
+      }
+      if (header && headerTextNorm.indexOf(nk) !== -1) {
+        replacePlaceholderInContainer_(header, combinedPattern, rawVal);
+      }
+      if (footer && footerTextNorm.indexOf(nk) !== -1) {
+        replacePlaceholderInContainer_(footer, combinedPattern, rawVal);
+      }
     }
     
     // Wajib simpan dan tutup agar perubahan teks tersinkronisasi
